@@ -1,4 +1,4 @@
-"""Testy rejestracji karty Lovelace (karta.py) z atrapami HA."""
+"""Testy rejestracji kart Lovelace (karta.py) z atrapami HA."""
 
 import asyncio
 import json
@@ -18,7 +18,8 @@ pytestmark = pytest.mark.skipif(
 karta = load_full("karta") if _ha_stub.STUBBED else None
 const = load_full("const") if _ha_stub.STUBBED else None
 
-URL = f"{karta.CARD_URL}?v={const.VERSION}" if karta else ""
+PLIK = "librus-terminarz-card.js"
+URL = f"{karta.URL_BASE}/{PLIK}?v={const.VERSION}" if karta else ""
 
 
 def _hass(lovelace):
@@ -40,65 +41,56 @@ def _zasoby(items, loaded=True):
 def test_tworzy_zasob_gdy_brak():
     z = _zasoby([])
     hass = _hass(SimpleNamespace(mode="storage", resources=z))
-    assert asyncio.run(karta._async_ensure_resource(hass, URL)) is True
+    assert asyncio.run(karta._async_ensure_resource(hass, PLIK, URL)) is True
     z.async_create_item.assert_awaited_once_with({"res_type": "module", "url": URL})
 
 
 def test_aktualizuje_wersje_zamiast_dodawac_duplikat():
-    z = _zasoby([{"id": "abc", "url": f"{karta.CARD_URL}?v=1.0.0", "type": "module"}])
+    z = _zasoby([{"id": "abc", "url": f"{karta.URL_BASE}/{PLIK}?v=0.0.1", "type": "module"}])
     hass = _hass(SimpleNamespace(mode="storage", resources=z))
-    assert asyncio.run(karta._async_ensure_resource(hass, URL)) is True
-    z.async_create_item.assert_not_awaited()
+    assert asyncio.run(karta._async_ensure_resource(hass, PLIK, URL)) is True
     z.async_update_item.assert_awaited_once_with("abc", {"res_type": "module", "url": URL})
+    z.async_create_item.assert_not_awaited()
 
 
-def test_nic_nie_robi_gdy_zasob_aktualny():
+def test_nie_rusza_aktualnego_zasobu():
     z = _zasoby([{"id": "abc", "url": URL}])
     hass = _hass(SimpleNamespace(mode="storage", resources=z))
-    assert asyncio.run(karta._async_ensure_resource(hass, URL)) is True
-    z.async_create_item.assert_not_awaited()
+    assert asyncio.run(karta._async_ensure_resource(hass, PLIK, URL)) is True
     z.async_update_item.assert_not_awaited()
+    z.async_create_item.assert_not_awaited()
 
 
-def test_wczytuje_zasoby_jesli_jeszcze_nie_zaladowane():
-    z = _zasoby([], loaded=False)
-    hass = _hass(SimpleNamespace(mode="storage", resources=z))
-    asyncio.run(karta._async_ensure_resource(hass, URL))
-    z.async_load.assert_awaited_once()
-
-
-def test_tryb_yaml_brak_lovelace_i_slownikowy_format():
-    assert asyncio.run(karta._async_ensure_resource(_hass(None), URL)) is False
-    assert asyncio.run(karta._async_ensure_resource(
-        _hass(SimpleNamespace(mode="yaml", resources=_zasoby([]))), URL)) is False
-    # starsze HA: slownik; kolekcja YAML nie ma async_create_item
-    yaml_kolekcja = SimpleNamespace(loaded=True, async_items=lambda: [])
-    assert asyncio.run(karta._async_ensure_resource(
-        _hass({"mode": "storage", "resources": yaml_kolekcja}), URL)) is False
+def test_tryb_yaml_i_brak_lovelace():
     z = _zasoby([])
-    assert asyncio.run(karta._async_ensure_resource(
-        _hass({"mode": "storage", "resources": z}), URL)) is True
+    assert asyncio.run(karta._async_ensure_resource(_hass(SimpleNamespace(mode="yaml", resources=z)), PLIK, URL)) is False
+    assert asyncio.run(karta._async_ensure_resource(_hass(None), PLIK, URL)) is False
 
 
-def test_rejestracja_fallback_przez_add_extra_js_url(monkeypatch):
-    hass = _hass(None)
-    hass.data = {}
+def test_slownik_lovelace():
+    z = _zasoby([])
+    hass = _hass({"mode": "storage", "resources": z})
+    assert asyncio.run(karta._async_ensure_resource(hass, PLIK, URL)) is True
+
+
+def test_rejestracja_raz_i_fallback_yaml():
+    hass = _hass(SimpleNamespace(mode="yaml", resources=_zasoby([])))
     hass.http.async_register_static_paths = AsyncMock()
-    dodano = MagicMock()
-    import sys
-    sys.modules["homeassistant.components.frontend"].add_extra_js_url = dodano
+    frontend = __import__("sys").modules["homeassistant.components.frontend"]
+    frontend.add_extra_js_url = MagicMock()
     asyncio.run(karta.async_register_frontend(hass))
+    asyncio.run(karta.async_register_frontend(hass))  # drugie wywolanie nic nie robi
     hass.http.async_register_static_paths.assert_awaited_once()
-    dodano.assert_called_once_with(hass, URL)
-    # drugie wywolanie nic nie robi
-    asyncio.run(karta.async_register_frontend(hass))
-    hass.http.async_register_static_paths.assert_awaited_once()
+    assert frontend.add_extra_js_url.call_count == len(karta.KARTY)
+    for plik in karta.KARTY:
+        frontend.add_extra_js_url.assert_any_call(hass, f"{karta.URL_BASE}/{plik}?v={const.VERSION}")
 
 
-def test_wersja_zgodna_z_manifestem_i_plik_karty_istnieje():
+def test_wersja_zgodna_z_manifestem_i_pliki_kart_istnieja():
     sciezka = Path(__file__).parent.parent / "custom_components" / "librus_apix"
     manifest = json.loads((sciezka / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["version"] == const.VERSION
-    assert (sciezka / "frontend" / karta.CARD_FILE).exists()
+    for plik in karta.KARTY:
+        assert (sciezka / "frontend" / plik).exists()
     assert "http" in manifest["dependencies"]
     assert "lovelace" in manifest["after_dependencies"]

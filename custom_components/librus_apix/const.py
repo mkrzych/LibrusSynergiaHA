@@ -16,7 +16,7 @@ TIMETABLE_REFRESH = timedelta(hours=4)
 # Default values
 DEFAULT_MESSAGES_COUNT = 10
 
-# Plan lekcji
+# Dni tygodnia (niezalezne od locale procesu)
 DNI_TYGODNIA_PL = [
     "poniedziałek",
     "wtorek",
