@@ -66,7 +66,7 @@ async def async_setup_entry(
     """Konfiguracja platformy czujnikow Librus APIX."""
     client = hass.data[DOMAIN][config_entry.entry_id]
 
-    coordinator = LibrusDataUpdateCoordinator(hass, client)
+    coordinator = LibrusDataUpdateCoordinator(hass, client, config_entry.entry_id)
     await coordinator.async_config_entry_first_refresh()
 
     entities: List[SensorEntity] = [
@@ -98,9 +98,10 @@ EVENT_NOWE_ZDARZENIE = f"{DOMAIN}_nowe_zdarzenie"
 class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
     """Klasa zarzadzajaca pobieraniem danych z Librus."""
 
-    def __init__(self, hass: HomeAssistant, client: Any) -> None:
+    def __init__(self, hass: HomeAssistant, client: Any, entry_id: str = "") -> None:
         """Inicjalizacja koordynatora."""
         self.client = client
+        self.entry_id = entry_id
         self._seen_message_hrefs: set = set()
         self._seen_grade_ids: set = set()
         self._seen_homework_ids: set = set()
@@ -199,9 +200,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         (zdarzenie["data"], zdarzenie["tytul"], zdarzenie["przedmiot"])
                     )
             else:
-                self._fire_events(wiadomosci, grades)
-                self._fire_homework_events(zadania)
-                self._fire_schedule_events(terminarz)
+                base = self._event_base(student_info)
+                self._fire_events(wiadomosci, grades, base)
+                self._fire_homework_events(zadania, base)
+                self._fire_schedule_events(terminarz, base)
 
             return result
 
@@ -210,7 +212,16 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         except Exception as err:
             raise UpdateFailed(f"Blad komunikacji z API: {err}") from err
 
-    def _fire_events(self, messages: List[Dict], grades: List[Dict]) -> None:
+    def _event_base(self, student_info: Any) -> Dict[str, Any]:
+        """Wspolne pola zdarzen: uczen i entry_id (do filtrowania po dziecku)."""
+        return {
+            "uczen": getattr(student_info, "name", "") or "",
+            "entry_id": self.entry_id,
+        }
+
+    def _fire_events(
+        self, messages: List[Dict], grades: List[Dict], base: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Wyslij zdarzenia HA dla nowych wiadomosci i ocen."""
         for msg in messages:
             href = msg.get("href", "")
@@ -224,6 +235,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "temat": msg.get("title", ""),
                         "data": msg.get("date", ""),
                         "ma_zalacznik": msg.get("has_attachment", False),
+                        **(base or {}),
                     },
                 )
 
@@ -240,10 +252,13 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "data": grade["date"],
                         "kategoria": grade["category"],
                         "nauczyciel": grade["teacher"],
+                        **(base or {}),
                     },
                 )
 
-    def _fire_schedule_events(self, terminarz: List[Dict]) -> None:
+    def _fire_schedule_events(
+        self, terminarz: List[Dict], base: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Wyslij zdarzenia HA dla nowych zdarzen w kalendarzu."""
         for zdarzenie in terminarz:
             ev_id = (zdarzenie["data"], zdarzenie["tytul"], zdarzenie["przedmiot"])
@@ -257,6 +272,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "tytul": zdarzenie["tytul"],
                         "przedmiot": zdarzenie["przedmiot"],
                         "godzina": zdarzenie["godzina"],
+                        **(base or {}),
                     },
                 )
 
@@ -286,7 +302,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         ]
         return sorted(zadania, key=lambda z: z["termin"])
 
-    def _fire_homework_events(self, zadania: List[Dict]) -> None:
+    def _fire_homework_events(
+        self, zadania: List[Dict], base: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Wyslij zdarzenia HA dla nowych zadan/sprawdzianow."""
         for zadanie in zadania:
             hw_id = (zadanie["przedmiot"], zadanie["termin"], zadanie["kategoria"])
@@ -300,6 +318,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "kategoria": zadanie["kategoria"],
                         "termin": zadanie["termin"],
                         "nauczyciel": zadanie["nauczyciel"],
+                        **(base or {}),
                     },
                 )
 
