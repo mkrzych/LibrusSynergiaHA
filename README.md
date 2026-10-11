@@ -241,7 +241,7 @@ Zdarzenia są wykrywane przy każdym odświeżeniu (co 2h). Pierwsze uruchomieni
 ### 📬 Powiadomienie o nowej wiadomości
 
 Zdarzenie: `librus_apix_nowa_wiadomosc`  
-Dostępne dane: `nadawca`, `temat`, `data`, `ma_zalacznik`
+Dostępne dane: `nadawca`, `temat`, `data`, `ma_zalacznik`, `uczen`, `entry_id`
 
 > **Uwaga:** Treść wiadomości nie jest pobierana celowo — aby nie oznaczać wiadomości jako przeczytanych w Librusie.
 
@@ -267,7 +267,7 @@ automation:
 ### 📝 Powiadomienie o nowej ocenie
 
 Zdarzenie: `librus_apix_nowa_ocena`  
-Dostępne dane: `przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`
+Dostępne dane: `przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`, `uczen`, `entry_id`
 
 ```yaml
 automation:
@@ -308,6 +308,48 @@ automation:
             {{ trigger.event.data.przedmiot }}
             ({{ 'usprawiedliwiona' if trigger.event.data.usprawiedliwiona else 'nieusprawiedliwiona' }})
 ```
+
+
+### 👧👦 Kilkoro dzieci - filtrowanie po uczniu
+
+Każde zdarzenie zawiera pola `uczen` (imię i nazwisko z Librusa) oraz `entry_id` (wpis integracji w HA), więc przy kilku kontach można rozdzielić powiadomienia. Każde dziecko to osobny wpis integracji (jeden login = jeden wpis; ten sam login nie może zostać dodany dwa razy).
+
+Jedna automatyzacja dla wszystkich dzieci (uczeń w tytule):
+
+```yaml
+automation:
+  - alias: "Librus - nowa ocena (wszystkie dzieci)"
+    trigger:
+      platform: event
+      event_type: librus_apix_nowa_ocena
+    action:
+      - service: notify.mobile_app_NAZWA_TWOJEGO_TELEFONU
+        data:
+          title: "🎓 {{ trigger.event.data.uczen }}: nowa ocena {{ trigger.event.data.ocena }}"
+          message: "{{ trigger.event.data.przedmiot }} ({{ trigger.event.data.kategoria }})"
+```
+
+Osobne powiadomienia dla wybranego dziecka (filtr w warunku):
+
+```yaml
+automation:
+  - alias: "Librus - nowa ocena Ola"
+    trigger:
+      platform: event
+      event_type: librus_apix_nowa_ocena
+    condition:
+      - condition: template
+        value_template: "{{ trigger.event.data.uczen == 'Ola Kowalska' }}"
+    action:
+      - service: notify.mobile_app_TELEFON_OLI
+        data:
+          message: "{{ trigger.event.data.przedmiot }}: {{ trigger.event.data.ocena }}"
+```
+
+### ✅ Pozostałe zdarzenia
+
+- `librus_apix_nowe_zadanie` - dane: `przedmiot`, `kategoria`, `termin`, `nauczyciel`, `uczen`, `entry_id`
+- `librus_apix_nowe_zdarzenie` (terminarz) - dane: `data`, `tytul`, `przedmiot`, `godzina`, `uczen`, `entry_id`
 
 > **Gdzie znaleźć nazwę telefonu?** HA → Settings → Devices & Services → Mobile App → nazwa urządzenia (np. `notify.mobile_app_samsung_galaxy_s24`)
 
