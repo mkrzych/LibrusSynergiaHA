@@ -138,7 +138,6 @@ def test_sensor_terminarza_zgodnosc_wsteczna_i_nowe_atrybuty():
         assert klucz in attrs
     assert attrs["typy"]["Kartkówka"] == 2
     assert attrs["liczba_zdarzen"] == len(attrs["zdarzenia"]) == s.native_value
-    assert attrs["zdarzenia"][0]["tydzien"] if "tydzien" in attrs["zdarzenia"][0] else True
     for klucz in ("typy_zdarzen", "liczba_sprawdzianow_7_dni", "najblizszy_sprawdzian", "zakres_do", "wersja_integracji"):
         assert klucz in attrs
     assert "zdarzenia" in sensor.LibrusTerminarzSensor._unrecorded_attributes

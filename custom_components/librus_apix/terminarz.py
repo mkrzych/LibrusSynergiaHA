@@ -141,7 +141,7 @@ def sprawdziany_w_oknie(zdarzenia: Iterable[Dict[str, Any]], dni: int = 7) -> Li
             "dni_do": e["dni_do"],
         }
         for e in zdarzenia
-        if e["wazne"] and 0 <= e["dni_do"] <= dni
+        if e["wazne"] and 0 <= e["dni_do"] < dni
     ]
 
 
