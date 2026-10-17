@@ -43,6 +43,7 @@ from .plan import (
 )
 from .scalanie import pusty_dzien, scal, zbuduj_tydzien
 from .terminarz import klasyfikuj, parsuj_szczegoly, podsumowanie, wzbogac_terminarz
+from .uwagi import podsumowanie as podsumowanie_uwag
 from .zadania import (
     do_pobrania_tresci,
     do_zrobienia,
@@ -141,6 +142,7 @@ async def async_setup_entry(
         LibrusZadaniaOtwarteSensor(coordinator, config_entry, slug, imie),
         LibrusFrekwencjaSensor(coordinator, config_entry),
         LibrusNieobecnosciSensor(coordinator, config_entry),
+        LibrusUwagiSensor(coordinator, config_entry),
         LibrusSprawdzianySensor(coordinator, config_entry),
     ]
 
@@ -160,6 +162,7 @@ EVENT_NOWA_OCENA = f"{DOMAIN}_nowa_ocena"
 EVENT_NOWE_ZADANIE = f"{DOMAIN}_nowe_zadanie"
 EVENT_NOWE_ZDARZENIE = f"{DOMAIN}_nowe_zdarzenie"
 EVENT_NOWA_NIEOBECNOSC = f"{DOMAIN}_nowa_nieobecnosc"
+EVENT_NOWA_UWAGA = f"{DOMAIN}_nowa_uwaga"
 
 # Symbole z dziennika: nb = nieobecnosc, u = nieobecnosc usprawiedliwiona
 SYMBOLE_NIEOBECNOSCI = {"nb", "u"}
@@ -220,7 +223,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._seen_homework_ids: set = set()
         self._seen_schedule_ids: set = set()
         self._seen_absence_ids: set = set()
+        self._seen_uwagi_ids: set = set()
         self._attendance_seeded: bool = False
+        self._uwagi_seeded: bool = False
         self._first_run: bool = True
         self._seen_wczytane: bool = False
         self._seen_po_wczytaniu: bool = False  # pierwszy cykl po wczytaniu stanu ze Store
@@ -270,6 +275,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             "terminarz": sorted(self._seen_schedule_ids),
             "nieobecnosci": sorted(self._seen_absence_ids),
             "frekwencja_zaladowana": self._attendance_seeded,
+            "uwagi": sorted(self._seen_uwagi_ids),
+            "uwagi_zaladowane": self._uwagi_seeded,
         }
 
     async def _async_wczytaj_seen(self) -> None:
@@ -291,6 +298,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._seen_schedule_ids = {str(k) for k in zapisane["terminarz"]}
         self._seen_absence_ids = {str(k) for k in zapisane["nieobecnosci"]}
         self._attendance_seeded = bool(zapisane.get("frekwencja_zaladowana"))
+        # Uwagi doszly pozniej - stary Store ich nie ma i wtedy robimy cichy seed
+        if isinstance(zapisane.get("uwagi"), list):
+            self._seen_uwagi_ids = {str(k) for k in zapisane["uwagi"]}
+            self._uwagi_seeded = bool(zapisane.get("uwagi_zaladowane"))
         self._first_run = False
         self._seen_po_wczytaniu = True
         self._seen_zapisane = self._seen_migawka()
@@ -359,6 +370,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             homework_raw = await self.client.async_get_homework()
             schedule_raw = await self.client.async_get_schedule()
             attendance_raw = await self.client.async_get_attendance()
+            uwagi_raw = await self.client.async_get_uwagi()
             frekwencja = self._build_frekwencja(attendance_raw)
             plan = await self._async_plan(now, today)
 
@@ -415,6 +427,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 zadanie_legacy(z) for z in zadania_norm if z["pilnosc"] != "po_terminie"
             ]
 
+            uwagi = uwagi_raw if uwagi_raw is not None else prev.get("uwagi", [])
             terminarz = schedule_raw if schedule_raw is not None else prev.get("terminarz", [])
             # Do zdarzen i sensora "Terminarz" bierzemy tylko przyszle wpisy (plan tygodnia widzi caly tydzien)
             terminarz_przyszly = [e for e in terminarz if e["data"] >= today.isoformat()]
@@ -429,6 +442,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 "zadania_aktualne": self._zadania_aktualne,
                 "terminarz": terminarz,
                 "frekwencja": frekwencja,
+                "uwagi": uwagi,
                 "plan": plan,
                 "plan_scalony": scal(plan["dni"], terminarz, zadania_norm),
                 "semestr_biezacy": current_sem,
@@ -462,6 +476,15 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 else:
                     self._fire_absence_events(frekwencja["nieobecnosci"])
 
+            # Uwagi maja wlasny seed (jak nieobecnosci): nieudane pierwsze pobranie nie moze
+            # skutkowac ogloszeniem starych uwag jako nowych
+            if uwagi_raw is not None:
+                if not self._uwagi_seeded:
+                    self._uwagi_seeded = True
+                    self._seen_uwagi_ids.update(u["id"] for u in uwagi_raw)
+                else:
+                    self._fire_remark_events(uwagi_raw, self._event_base(student_info))
+
             # Przycinanie: zbiory trzymaja tylko klucze nadal widoczne w zrodle (Store nie rosnie)
             if wiadomosci:
                 self._seen_message_hrefs &= {m.get("href") for m in wiadomosci}
@@ -475,6 +498,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 self._seen_absence_ids &= {
                     _klucz_nieobecnosci(w) for w in frekwencja["nieobecnosci"]
                 }
+            if uwagi_raw is not None:
+                self._seen_uwagi_ids &= {u["id"] for u in uwagi_raw}
             self._seen_po_wczytaniu = False
             await self._async_zapisz_seen()
 
@@ -669,6 +694,31 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "temat": wpis["temat"],
                     },
                 )
+
+    def _fire_remark_events(self, uwagi: List[Dict], base: Optional[Dict[str, Any]] = None) -> None:
+        """Wyslij zdarzenia HA dla nowych uwag i pochwal nauczycieli."""
+        nowe = [u for u in uwagi if u["id"] not in self._seen_uwagi_ids]
+        if self._seen_po_wczytaniu:
+            nowe = _ogranicz_lawine(nowe, "data", "uwagi")
+        for uwaga in uwagi:
+            if uwaga["id"] in self._seen_uwagi_ids:
+                continue
+            self._seen_uwagi_ids.add(uwaga["id"])
+            if uwaga not in nowe:
+                continue
+            _LOGGER.debug("Nowa uwaga: %s %s", uwaga["data"], uwaga["typ"])
+            self.hass.bus.fire(
+                EVENT_NOWA_UWAGA,
+                {
+                    "tresc": uwaga["tresc"],
+                    "data": uwaga["data"],
+                    "nauczyciel": uwaga["nauczyciel"],
+                    "typ": uwaga["typ"],
+                    "rodzaj": uwaga["rodzaj"],
+                    "kategoria": uwaga["kategoria"],
+                    **(base or {}),
+                },
+            )
 
     def _build_wiadomosci(self, messages: Optional[List[Dict]]) -> List[Dict]:
         """Oznacz nowe wiadomosci i zwroc liste."""
@@ -1452,5 +1502,45 @@ class LibrusNieobecnosciSensor(CoordinatorEntity, SensorEntity):
                     "nauczyciel": w["nauczyciel"],
                 }
                 for w in lista[: self.MAX_LISTA]
+            ],
+        }
+
+
+class LibrusUwagiSensor(CoordinatorEntity, SensorEntity):
+    """Czujnik uwag i pochwal nauczycieli."""
+
+    MAX_LISTA = 30
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        """Inicjalizacja."""
+        super().__init__(coordinator)
+        self._config_entry = config_entry
+        self._attr_has_entity_name = False
+        self._attr_name = "Uwagi nauczycieli"
+        self._attr_unique_id = f"{config_entry.entry_id}_uwagi"
+        self._attr_icon = "mdi:comment-text-outline"
+
+    @property
+    def device_info(self) -> Dict[str, Any]:
+        """Informacje o urzadzeniu."""
+        return _device_info(self.coordinator, self._config_entry)
+
+    def _uwagi(self) -> List[Dict]:
+        return (self.coordinator.data or {}).get("uwagi", [])
+
+    @property
+    def native_value(self) -> int:
+        """Liczba wszystkich wpisow (uwagi i pochwaly)."""
+        return len(self._uwagi())
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        """Liczniki pochwal i uwag oraz lista wpisow (najnowsze pierwsze)."""
+        lista = sorted(self._uwagi(), key=lambda u: u["data"], reverse=True)
+        return {
+            **podsumowanie_uwag(lista),
+            "lista": [
+                {k: u[k] for k in ("data", "typ", "nauczyciel", "kategoria", "tresc")}
+                for u in lista[: self.MAX_LISTA]
             ],
         }

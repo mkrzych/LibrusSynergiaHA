@@ -144,3 +144,34 @@ def test_homework_detail(klient):
         m.assert_called_once()
     with patch("librus_apix.homework.homework_detail", side_effect=RuntimeError("x")):
         assert asyncio.run(klient.async_get_homework_detail("z1")) is None
+
+
+def _odpowiedz(html):
+    return SimpleNamespace(text=html)
+
+
+def test_uwagi_parsuje_strone_z_klienta(klient):
+    from _builders import FIXTURES
+    klient._client.BASE_URL = "https://synergia.librus.pl"
+    klient._client.get.return_value = _odpowiedz((FIXTURES / "uwagi.html").read_text(encoding="utf-8"))
+    wynik = asyncio.run(klient.async_get_uwagi())
+    klient._client.get.assert_called_once_with("https://synergia.librus.pl/uwagi")
+    assert len(wynik) == 4 and wynik[0]["typ"] == "pochwala"
+
+
+def test_uwagi_brak_dostepu_wymusza_ponowne_logowanie(klient):
+    strona = _odpowiedz('<h2 class="inside">Brak dostępu</h2>')
+    klient._client.BASE_URL = "https://synergia.librus.pl"
+    klient._client.get.return_value = strona
+    stary = klient._client
+    nowy = MagicMock()
+    nowy.BASE_URL = "https://synergia.librus.pl"
+    nowy.get.return_value = strona
+
+    async def auth():
+        klient._client, klient._token = nowy, "t"
+        return True
+
+    klient.async_authenticate = auth
+    assert asyncio.run(klient.async_get_uwagi()) is None
+    assert stary.get.call_count == 1 and nowy.get.call_count == 1  # druga proba na swiezym kliencie

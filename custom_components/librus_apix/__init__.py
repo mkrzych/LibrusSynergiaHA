@@ -348,6 +348,49 @@ class LibrusApiClient:
                 if attempt == 1:
                     return None
 
+    @staticmethod
+    def _fetch_uwagi(client):
+        """Pobierz i sparsuj strone uwag (blokujace, do executora)."""
+        from .uwagi import BrakDostepu, NieznanyUklad, parsuj_uwagi
+
+        resp = client.get(client.BASE_URL + "/uwagi")
+        try:
+            return parsuj_uwagi(resp.text)
+        except BrakDostepu as ex:
+            raise TokenError("Malformed or expired token.") from ex
+        except NieznanyUklad as ex:
+            raise ParseError(str(ex)) from ex
+
+    async def async_get_uwagi(self):
+        """Get teacher remarks (praise and notes) or None on failure."""
+        for attempt in range(2):
+            try:
+                if not self._client or not self._token:
+                    if not await self.async_authenticate():
+                        return None
+
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(None, self._fetch_uwagi, self._client)
+
+            except (TokenError, ParseError) as ex:
+                # Wygasla sesja czesto konczy sie ekranem logowania (brak tabeli) - ponow logowanie raz
+                _LOGGER.warning(
+                    "Remarks unavailable (attempt %d/2): %s, re-authenticating...",
+                    attempt + 1, ex,
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    _LOGGER.error("Failed to get remarks after re-authentication.")
+                    return None
+            except Exception as ex:
+                _LOGGER.error(
+                    "Failed to get remarks (attempt %d/2): %s\n%s",
+                    attempt + 1, ex, traceback.format_exc(),
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    return None
+
     async def async_get_schedule(self, od: Optional[date] = None, do: Optional[date] = None):
         """Get calendar events from Librus.
 

@@ -4,7 +4,7 @@
  * Każda wartość z danych trafia do HTML wyłącznie przez esc().
  */
 
-export const CARD_VERSION = "1.3.0";
+export const CARD_VERSION = "1.4.0";
 
 const DNI = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"];
 const SKROTY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"];
