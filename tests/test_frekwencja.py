@@ -120,6 +120,8 @@ async def test_event_tylko_dla_nowej_nieobecnosci(hass, events):
         "usprawiedliwiona": False,
         "nauczyciel": "Jan Kowalski",
         "temat": "Ułamki",
+        "uczen": "",
+        "entry_id": coordinator.entry_id,
     }]
 
 

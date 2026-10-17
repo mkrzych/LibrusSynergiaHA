@@ -474,7 +474,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     for wpis in frekwencja["nieobecnosci"]:
                         self._seen_absence_ids.add(_klucz_nieobecnosci(wpis))
                 else:
-                    self._fire_absence_events(frekwencja["nieobecnosci"])
+                    self._fire_absence_events(
+                        frekwencja["nieobecnosci"], self._event_base(student_info)
+                    )
 
             # Uwagi maja wlasny seed (jak nieobecnosci): nieudane pierwsze pobranie nie moze
             # skutkowac ogloszeniem starych uwag jako nowych
@@ -670,7 +672,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             "nieobecnosci": nieobecnosci,
         }
 
-    def _fire_absence_events(self, nieobecnosci: List[Dict]) -> None:
+    def _fire_absence_events(
+        self, nieobecnosci: List[Dict], base: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Wyslij zdarzenia HA dla nowych nieobecnosci."""
         nowe = [w for w in nieobecnosci if _klucz_nieobecnosci(w) not in self._seen_absence_ids]
         if self._seen_po_wczytaniu:
@@ -692,6 +696,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "usprawiedliwiona": wpis["usprawiedliwiona"],
                         "nauczyciel": wpis["nauczyciel"],
                         "temat": wpis["temat"],
+                        **(base or {}),
                     },
                 )
 
