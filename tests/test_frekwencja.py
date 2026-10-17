@@ -1,17 +1,54 @@
 """Testy frekwencji: sensory i zdarzenie nowej nieobecnosci."""
 
+import asyncio
+import inspect
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from homeassistant.core import HomeAssistant
 
-from custom_components.librus_apix.const import DOMAIN
-from custom_components.librus_apix.sensor import (
-    EVENT_NOWA_NIEOBECNOSC,
-    LibrusDataUpdateCoordinator,
-    LibrusFrekwencjaSensor,
-    LibrusNieobecnosciSensor,
-)
+import _ha_stub  # noqa: F401
+from _pure import load_full, load_package
+
+const = load_full("const")
+sensor = load_full("sensor")
+pkg = load_package()
+
+DOMAIN = const.DOMAIN
+EVENT_NOWA_NIEOBECNOSC = sensor.EVENT_NOWA_NIEOBECNOSC
+LibrusDataUpdateCoordinator = sensor.LibrusDataUpdateCoordinator
+LibrusFrekwencjaSensor = sensor.LibrusFrekwencjaSensor
+LibrusNieobecnosciSensor = sensor.LibrusNieobecnosciSensor
+
+
+class _Bus:
+    def __init__(self):
+        self._listeners = {}
+        self._pending = []
+
+    def async_listen(self, event_type, callback):
+        self._listeners.setdefault(event_type, []).append(callback)
+
+    def fire(self, event_type, data):
+        event = MagicMock()
+        event.data = data
+        for callback in self._listeners.get(event_type, []):
+            result = callback(event)
+            if inspect.isawaitable(result):
+                self._pending.append(result)
+
+
+@pytest.fixture
+def hass():
+    hass = MagicMock()
+    hass.bus = _Bus()
+
+    async def _async_block_till_done():
+        if hass.bus._pending:
+            await asyncio.gather(*hass.bus._pending)
+            hass.bus._pending.clear()
+
+    hass.async_block_till_done = AsyncMock(side_effect=_async_block_till_done)
+    return hass
 
 
 def _wpis(symbol, data, lekcja, href):
@@ -42,12 +79,13 @@ def _client(attendance):
     client.async_get_messages = AsyncMock(return_value=[])
     client.async_get_homework = AsyncMock(return_value=[])
     client.async_get_schedule = AsyncMock(return_value=[])
+    client.async_get_timetable = AsyncMock(return_value={"dni": {}, "godziny": {}, "braki": []})
     client.async_get_attendance = AsyncMock(side_effect=attendance)
     return client
 
 
 @pytest.fixture
-def events(hass: HomeAssistant):
+def events(hass):
     zebrane = []
     hass.bus.async_listen(EVENT_NOWA_NIEOBECNOSC, lambda e: zebrane.append(e.data))
     return zebrane
@@ -147,7 +185,7 @@ async def test_klient_mapuje_wpisy_biblioteki():
 
     from librus_apix.attendance import Attendance
 
-    from custom_components.librus_apix import LibrusApiClient
+    LibrusApiClient = pkg.LibrusApiClient
 
     sem1 = [Attendance("NB", "/h1", 0, "2026-09-02", "Nieobecność", "J. K.", 3, False, "T", "Mat")]
     sem2 = [Attendance("sp", "/h2", 1, "2027-02-02", "Spóźnienie", "J. K.", 1, False, "T", "Fiz")]

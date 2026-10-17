@@ -1,7 +1,5 @@
 # 🎓 Librus APIX Integration for Home Assistant
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/LukMaverick)
-
 Integracja Home Assistant z systemem Librus Synergia, umożliwiająca monitorowanie ocen, wiadomości i innych danych szkolnych.
 
 ## ✨ Funkcje
@@ -139,14 +137,14 @@ Zdarzenie `librus_apix_nowe_zadanie` zawiera teraz także `id`, `termin_iso`, `d
 
 Kliknij poniższy przycisk, aby automatycznie dodać repozytorium do HACS z właściwą kategorią:
 
-[![Otwórz w HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=LukMaverick&repository=LibrusSynergiaHA&category=integration)
+[![Otwórz w HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mkrzych&repository=LibrusSynergiaHA&category=integration)
 
 Lub ręcznie:
 
 1. Otwórz HACS w Home Assistant
 2. Kliknij trzy kropki (⋮) w prawym górnym rogu
 3. Wybierz **"Custom repositories"**
-4. W polu URL wpisz dokładnie: `https://github.com/LukMaverick/LibrusSynergiaHA`  
+4. W polu URL wpisz dokładnie: `https://github.com/mkrzych/LibrusSynergiaHA`  
    ⚠️ **Bez `.git` na końcu!**
 5. W polu **Category** wybierz: **`Integration`**  
    ⚠️ **NIE wybieraj "AppDaemon", "Plugin" ani żadnej innej opcji!**
@@ -518,8 +516,8 @@ automation:
 ### Setup środowiska deweloperskiego
 ```bash
 # Klonuj repozytorium
-git clone https://github.com/twoje-username/librus-ha-integration
-cd librus-ha-integration
+git clone https://github.com/mkrzych/LibrusSynergiaHA
+cd LibrusSynergiaHA
 
 # Uruchom środowisko testowe
 docker-compose up -d
@@ -566,7 +564,7 @@ MIT License - patrz [LICENSE](LICENSE)
 
 ## 🤝 Wkład
 
-Pull requesty są mile widziane! Sprawdź [CONTRIBUTING.md](CONTRIBUTING.md)
+Pull requesty i zgłoszenia błędów są mile widziane – użyj [Issues](https://github.com/mkrzych/LibrusSynergiaHA/issues).
 
 ### 🙏 Podziękowania
 
@@ -574,14 +572,10 @@ Specjalne podziękowania dla **KB** za wsparcie i pomoc w rozwoju projektu.
 
 ## 👨‍💻 Autor
 
-Stworzono na bazie biblioteki [librus-apix](https://github.com/RustySnek/librus-apix)
+Rozwijane przez [Marcina Krzycha](https://github.com/mkrzych).
+
+Projekt jest forkiem [LukMaverick/LibrusSynergiaHA](https://github.com/LukMaverick/LibrusSynergiaHA) (licencja MIT) i rozwija się niezależnie. Korzysta z biblioteki [librus-apix](https://github.com/RustySnek/librus-apix).
 
 ---
 
 **⭐ Jeśli podoba Ci się projekt, zostaw gwiazdkę na GitHub!**
-
-## ☕ Wesprzyj projekt
-
-Jeśli integracja jest dla Ciebie przydatna, możesz postawić kawę 😊
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/LukMaverick)
