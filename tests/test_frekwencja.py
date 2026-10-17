@@ -1,5 +1,7 @@
 """Testy frekwencji: sensory i zdarzenie nowej nieobecnosci."""
 
+import asyncio
+import inspect
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,6 +23,7 @@ LibrusNieobecnosciSensor = sensor.LibrusNieobecnosciSensor
 class _Bus:
     def __init__(self):
         self._listeners = {}
+        self._pending = []
 
     def async_listen(self, event_type, callback):
         self._listeners.setdefault(event_type, []).append(callback)
@@ -29,14 +32,22 @@ class _Bus:
         event = MagicMock()
         event.data = data
         for callback in self._listeners.get(event_type, []):
-            callback(event)
+            result = callback(event)
+            if inspect.isawaitable(result):
+                self._pending.append(result)
 
 
 @pytest.fixture
 def hass():
     hass = MagicMock()
     hass.bus = _Bus()
-    hass.async_block_till_done = AsyncMock()
+
+    async def _async_block_till_done():
+        if hass.bus._pending:
+            await asyncio.gather(*hass.bus._pending)
+            hass.bus._pending.clear()
+
+    hass.async_block_till_done = AsyncMock(side_effect=_async_block_till_done)
     return hass
 
 
