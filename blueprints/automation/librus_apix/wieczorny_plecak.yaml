@@ -1,0 +1,118 @@
+blueprint:
+  name: Librus – wieczorne przypomnienie o plecaku
+  description: >-
+    Wieczorem wysyła na telefon podsumowanie na następny dzień nauki:
+    przedmioty do spakowania, zadania domowe i sprawdziany. W dni wolne od
+    szkoły nic nie wysyła. Wymaga sensorów „Plan lekcji jutro” i „Do zrobienia
+    na jutro” (nazwy zaczynają się od sensor.librus_ i imienia dziecka).
+  domain: automation
+  source_url: https://github.com/mkrzych/LibrusSynergiaHA/blob/main/blueprints/automation/librus_apix/wieczorny_plecak.yaml
+  homeassistant:
+    min_version: 2024.8.0
+  input:
+    telefon:
+      name: Telefon
+      description: Urządzenie z aplikacją Home Assistant, na które trafi powiadomienie.
+      selector:
+        device:
+          integration: mobile_app
+    plan_jutro:
+      name: Sensor „Plan lekcji jutro”
+      description: Np. sensor.librus_ola_plan_jutro.
+      selector:
+        entity:
+          integration: librus_apix
+          domain: sensor
+    do_zrobienia:
+      name: Sensor „Do zrobienia na jutro”
+      description: Np. sensor.librus_ola_do_zrobienia_jutro.
+      selector:
+        entity:
+          integration: librus_apix
+          domain: sensor
+    godzina:
+      name: Godzina powiadomienia
+      default: "19:00:00"
+      selector:
+        time:
+    dni_tygodnia:
+      name: Dni tygodnia
+      description: >-
+        W które dni wysyłać przypomnienie. Domyślnie od niedzieli do czwartku,
+        bo w piątek i sobotę „jutro” oznacza poniedziałek.
+      default: [sun, mon, tue, wed, thu]
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - label: Poniedziałek
+              value: mon
+            - label: Wtorek
+              value: tue
+            - label: Środa
+              value: wed
+            - label: Czwartek
+              value: thu
+            - label: Piątek
+              value: fri
+            - label: Sobota
+              value: sat
+            - label: Niedziela
+              value: sun
+    pomin_gdy_pusto:
+      name: Pomiń, gdy nie ma nic do zrobienia
+      description: Nie wysyłaj, jeśli nie ma przedmiotów, zadań ani sprawdzianów.
+      default: true
+      selector:
+        boolean:
+
+mode: single
+
+trigger:
+  - platform: time
+    at: !input godzina
+
+variables:
+  plan_jutro: !input plan_jutro
+  do_zrobienia: !input do_zrobienia
+  pomin_gdy_pusto: !input pomin_gdy_pusto
+  wolne: "{{ state_attr(plan_jutro, 'dzien_wolny') == true }}"
+  przedmioty: "{{ state_attr(do_zrobienia, 'przedmioty_do_spakowania') or [] }}"
+  zadania: "{{ state_attr(do_zrobienia, 'zadania') or [] }}"
+  sprawdziany: "{{ state_attr(do_zrobienia, 'sprawdziany') or [] }}"
+
+condition:
+  - condition: time
+    weekday: !input dni_tygodnia
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: !input plan_jutro
+        state:
+          - unavailable
+          - unknown
+  - condition: template
+    value_template: >-
+      {{ not wolne
+         and (not pomin_gdy_pusto
+              or (przedmioty | count) + (zadania | count) + (sprawdziany | count) > 0) }}
+
+action:
+  - domain: mobile_app
+    type: notify
+    device_id: !input telefon
+    title: "🎒 Plecak na jutro"
+    message: |-
+      {% if przedmioty -%}
+      Przedmioty: {{ przedmioty | join(', ') }}
+      {% endif -%}
+      {% for z in zadania -%}
+      🏠 {{ z.przedmiot }}{{ (': ' ~ z.tresc) if z.tresc else '' }}
+      {% endfor -%}
+      {% for s in sprawdziany -%}
+      📝 {{ s.przedmiot | default('') }}{{ (': ' ~ s.tytul) if s.tytul | default('') else '' }}
+      {% endfor -%}
+    data:
+      tag: librus_plecak
+      group: librus

@@ -1,0 +1,110 @@
+blueprint:
+  name: Librus – poranne zmiany w planie lekcji
+  description: >-
+    Rano wysyła na telefon informację o lekcjach odwołanych i zastępstwach na
+    dzisiaj. Gdy zmian nie ma, nic nie wysyła. Dane z Librusa odświeżają się
+    co 2 godziny, więc zmiana wpisana po wybranej godzinie dotrze dopiero przy
+    następnym odświeżeniu.
+  domain: automation
+  source_url: https://github.com/mkrzych/LibrusSynergiaHA/blob/main/blueprints/automation/librus_apix/zmiany_w_planie.yaml
+  homeassistant:
+    min_version: 2024.8.0
+  input:
+    telefon:
+      name: Telefon
+      description: Urządzenie z aplikacją Home Assistant, na które trafi powiadomienie.
+      selector:
+        device:
+          integration: mobile_app
+    plan_dzis:
+      name: Sensor „Plan lekcji dziś”
+      description: Np. sensor.librus_ola_plan_dzis.
+      selector:
+        entity:
+          integration: librus_apix
+          domain: sensor
+    godzina:
+      name: Godzina powiadomienia
+      default: "06:45:00"
+      selector:
+        time:
+    dni_tygodnia:
+      name: Dni tygodnia
+      default: [mon, tue, wed, thu, fri]
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - label: Poniedziałek
+              value: mon
+            - label: Wtorek
+              value: tue
+            - label: Środa
+              value: wed
+            - label: Czwartek
+              value: thu
+            - label: Piątek
+              value: fri
+            - label: Sobota
+              value: sat
+            - label: Niedziela
+              value: sun
+    odwolane:
+      name: Powiadamiaj o odwołanych lekcjach
+      default: true
+      selector:
+        boolean:
+    zastepstwa:
+      name: Powiadamiaj o zastępstwach
+      default: true
+      selector:
+        boolean:
+
+mode: single
+
+trigger:
+  - platform: time
+    at: !input godzina
+
+variables:
+  plan_dzis: !input plan_dzis
+  chce_odwolane: !input odwolane
+  chce_zastepstwa: !input zastepstwa
+  lekcje: >-
+    {{ (state_attr(plan_dzis, 'lekcje') or [])
+       | selectattr('przedmiot', 'ne', '') | list }}
+  odwolane: >-
+    {{ (lekcje | selectattr('odwolana') | list) if chce_odwolane else [] }}
+  zastepstwa: >-
+    {{ (lekcje | rejectattr('odwolana') | selectattr('zastepstwo') | list)
+       if chce_zastepstwa else [] }}
+
+condition:
+  - condition: time
+    weekday: !input dni_tygodnia
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: !input plan_dzis
+        state:
+          - unavailable
+          - unknown
+  - condition: template
+    value_template: "{{ (odwolane | count) + (zastepstwa | count) > 0 }}"
+
+action:
+  - domain: mobile_app
+    type: notify
+    device_id: !input telefon
+    title: "🏫 Zmiany w planie na dziś"
+    message: |-
+      {% for l in odwolane -%}
+      ❌ {{ l.numer }}. {{ l.przedmiot }} – odwołana
+      {% endfor -%}
+      {% for l in zastepstwa -%}
+      ⚠️ {{ l.numer }}. {{ l.przedmiot }} – zastępstwo{{ (' (' ~ l.info ~ ')') if l.info else '' }}
+      {% endfor -%}
+    data:
+      tag: librus_plan
+      group: librus
