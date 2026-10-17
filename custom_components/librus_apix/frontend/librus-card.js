@@ -10,7 +10,7 @@
  * konfiguracja, odpowiedź usługi) trafia do HTML wyłącznie przez `esc()`.
  */
 
-export const CARD_VERSION = "1.3.0";
+export const CARD_VERSION = "1.4.0";
 
 const KLUCZ_UCZNIA = "librus-card:uczen";
 export const WIDOKI = ["dzis", "jutro", "tydzien", "zadania", "plecak"];

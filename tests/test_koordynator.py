@@ -38,6 +38,8 @@ class FakeClient:
         self.homework = [homework(**h) for h in fixture("zadania.json")]
         self.homework_ok = True
         self.terminarz = fixture("terminarz_pulapki.json")
+        self.uwagi = []
+        self.uwagi_ok = True
 
     async def async_get_student_information(self):
         return SimpleNamespace(name="Ola Kowalska", class_name="5A", number=7, tutor="X", school="Y", lucky_number=3)
@@ -63,6 +65,9 @@ class FakeClient:
 
     async def async_get_attendance(self):
         return {"wpisy": [], "frekwencja": {"semestr_1": 100.0, "semestr_2": 100.0, "calosc": 100.0}}
+
+    async def async_get_uwagi(self):
+        return self.uwagi if self.uwagi_ok else None
 
     async def async_get_timetable(self, start=None, weeks=2):
         self.wywolania["timetable"].append((start, weeks))
@@ -288,7 +293,7 @@ def test_plan_tygodnia_domyslnie_najblizszy_tydzien_nauki(koordynator, czas):
     e = _encje(koordynator)
     a = e["tydzien"].extra_state_attributes
     assert e["tydzien"].native_value == "12.10–18.10"
-    assert a["entry_id"] == "e1" and a["tryb"] == "auto" and a["wersja_integracji"] == "1.3.0"
+    assert a["entry_id"] == "e1" and a["tryb"] == "auto" and a["wersja_integracji"] == "1.4.0"
     czas["now"] = datetime(2026, 10, 17, 9, 0, tzinfo=timezone.utc)  # sobota
     assert e["tydzien"].native_value == "19.10–25.10"
     assert e["tydzien"].extra_state_attributes["dni"][0]["lekcje"][0]["przedmiot"] == "Matematyka"
@@ -415,3 +420,54 @@ def test_limit_lawiny_po_restarcie(koordynator):
     assert "2026-11-25" in daty and "2026-11-01" not in daty
     odswiez(k2)  # pominiete nie wracaja
     assert len(_zdarzenia(k2.hass, sensor.EVENT_NOWE_ZDARZENIE)) == sensor.SEEN_LIMIT_LAWINY
+
+
+def _uwaga(tresc="Reprezentowanie szkoly", typ="pochwala", data="2026-10-15"):
+    return {"id": f"{data}|Kowalska Anna|{tresc}", "tresc": tresc, "data": data,
+            "nauczyciel": "Kowalska Anna", "rodzaj": "pozytywna", "kategoria": "Uwaga", "typ": typ}
+
+
+def test_uwagi_pierwszy_cykl_cichy_potem_nowa_uwaga_daje_zdarzenie(koordynator):
+    k, klient, hass = koordynator
+    klient.uwagi = [_uwaga()]
+    odswiez(k)
+    assert _zdarzenia(hass, sensor.EVENT_NOWA_UWAGA) == []
+    assert k.data["uwagi"] == klient.uwagi
+    klient.uwagi = [_uwaga(), _uwaga("Rozmowa na lekcji", "uwaga", "2026-10-16")]
+    odswiez(k)
+    odswiez(k)  # ponowne odswiezenie nie duplikuje zdarzenia
+    zd = _zdarzenia(hass, sensor.EVENT_NOWA_UWAGA)
+    assert len(zd) == 1 and zd[0]["typ"] == "uwaga" and zd[0]["tresc"] == "Rozmowa na lekcji"
+    assert zd[0]["entry_id"] == "e1" and zd[0]["uczen"] == "Ola Kowalska"
+
+
+def test_uwagi_blad_pobrania_zachowuje_poprzednie_i_nie_ogasza_starych(koordynator):
+    k, klient, hass = koordynator
+    klient.uwagi_ok = False
+    odswiez(k)  # pierwsze pobranie nieudane - brak seedu
+    klient.uwagi_ok, klient.uwagi = True, [_uwaga()]
+    odswiez(k)
+    assert _zdarzenia(hass, sensor.EVENT_NOWA_UWAGA) == []  # stare uwagi to seed, nie nowosc
+    klient.uwagi_ok = False
+    odswiez(k)
+    assert k.data["uwagi"] == [_uwaga()]
+
+
+def test_uwagi_dedup_przetrwa_restart_a_stary_store_bez_uwag_jest_cichy(koordynator):
+    k, klient, _ = koordynator
+    klient.uwagi = [_uwaga()]
+    odswiez(k)
+    zapisane = dict(k._seen_store.zapisane)
+    assert zapisane["uwagi"] == [_uwaga()["id"]] and zapisane["uwagi_zaladowane"] is True
+
+    klient.uwagi.append(_uwaga("Nowa pochwala", "pochwala", "2026-10-17"))
+    _ha_stub.Store.wczytane_wg_klucza = {k._seen_store.key: zapisane}
+    k2 = _nowy_koordynator(klient)
+    odswiez(k2)
+    assert [z["tresc"] for z in _zdarzenia(k2.hass, sensor.EVENT_NOWA_UWAGA)] == ["Nowa pochwala"]
+
+    stary = {p: v for p, v in zapisane.items() if p not in ("uwagi", "uwagi_zaladowane")}
+    _ha_stub.Store.wczytane_wg_klucza = {k._seen_store.key: stary}
+    k3 = _nowy_koordynator(klient)
+    odswiez(k3)
+    assert _zdarzenia(k3.hass, sensor.EVENT_NOWA_UWAGA) == []

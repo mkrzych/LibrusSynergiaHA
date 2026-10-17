@@ -240,7 +240,7 @@ function stanyUcznia(slug) {
     },
     [`${p}plan_tygodnia`]: {
       entity_id: `${p}plan_tygodnia`, state: `${fmtData(t.tydzien_od)}–${fmtData(dodajDni(t.tydzien_od, 4))}`,
-      attributes: { entry_id: `entry_${slug}`, tryb: "auto", ...t, nieaktualne: false, wersja_integracji: stan.nowaWersja ? "1.3.1" : "1.3.0" },
+      attributes: { entry_id: `entry_${slug}`, tryb: "auto", ...t, nieaktualne: false, wersja_integracji: stan.nowaWersja ? "1.4.1" : "1.4.0" },
     },
     [`${p}do_zrobienia_jutro`]: {
       entity_id: `${p}do_zrobienia_jutro`, state: String(jutroZadania.length + sprawdziany.length),

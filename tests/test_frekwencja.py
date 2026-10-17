@@ -81,6 +81,7 @@ def _client(attendance):
     client.async_get_schedule = AsyncMock(return_value=[])
     client.async_get_timetable = AsyncMock(return_value={"dni": {}, "godziny": {}, "braki": []})
     client.async_get_attendance = AsyncMock(side_effect=attendance)
+    client.async_get_uwagi = AsyncMock(return_value=[])
     return client
 
 

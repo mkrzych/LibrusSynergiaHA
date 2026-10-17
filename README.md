@@ -13,8 +13,9 @@ Integracja Home Assistant z dziennikiem **Librus Synergia**: oceny, średnie, fr
 | 📅 **Plan lekcji** | dziś, jutro, następna lekcja i cały tydzień, scalone ze sprawdzianami, zadaniami i zastępstwami |
 | 🗓️ **Terminarz** | zdarzenia sklasyfikowane według typu (sprawdzian, kartkówka, wycieczka, dzień wolny...) |
 | 🏠 **Zadania domowe** | lista z pilnością oraz sensor „do zrobienia na jutro" i „co spakować do plecaka" |
+| 💬 **Uwagi nauczycieli** | pochwały i uwagi z dziennika (data, nauczyciel, treść, kategoria), liczniki i lista ostatnich wpisów |
 | 📬 **Wiadomości** | nadawca, temat, data i załączniki (treść nie jest pobierana, więc wiadomość nie zostaje oznaczona jako przeczytana) |
-| 🔔 **Zdarzenia** | nowa ocena, wiadomość, nieobecność, zadanie i wpis w terminarzu, gotowe do automatyzacji |
+| 🔔 **Zdarzenia** | nowa ocena, wiadomość, nieobecność, uwaga lub pochwała, zadanie i wpis w terminarzu, gotowe do automatyzacji |
 | 🧒 **Dwie karty** | `librus-card` (dashboard dziecka) i `librus-terminarz-card` instalują się razem z integracją |
 | 👧👦 **Wielu uczniów** | każde dziecko to osobny wpis integracji, a zdarzenia niosą imię ucznia i `entry_id` |
 
@@ -62,6 +63,7 @@ Dane odświeżają się **co 2 godziny**. Pierwsze uruchomienie tylko zapamiętu
 | `sensor.srednia_<przedmiot>` | średnia z przedmiotu | wykres historii |
 | `sensor.frekwencja` | % frekwencji | atrybuty `semestr_1`, `semestr_2` |
 | `sensor.nieobecnosci` | liczba nieobecności | `usprawiedliwione`, `nieusprawiedliwione`, `lista` (ostatnie 30) |
+| `sensor.uwagi_nauczycieli` | liczba wpisów | `pochwaly`, `uwagi`, `lista` (ostatnie 30, najnowsze pierwsze) |
 | `sensor.wiadomosci` | liczba nieprzeczytanych | lista wiadomości w atrybutach |
 | `sensor.terminarz` | liczba zdarzeń | atrybuty opisane w sekcji `librus-terminarz-card` |
 | `sensor.sprawdziany` | sprawdziany i kartkówki w ciągu 7 dni | pod odznaki i automatyzacje |
@@ -214,10 +216,28 @@ Integracja wysyła zdarzenia Home Assistant przy każdym odświeżeniu danych. M
 | `librus_apix_nowa_ocena` | `przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`, `uczen`, `entry_id` |
 | `librus_apix_nowa_wiadomosc` | `nadawca`, `temat`, `data`, `ma_zalacznik`, `uczen`, `entry_id` |
 | `librus_apix_nowa_nieobecnosc` | `data`, `przedmiot`, `numer_lekcji`, `typ`, `usprawiedliwiona`, `nauczyciel`, `temat` |
+| `librus_apix_nowa_uwaga` | `tresc`, `data`, `nauczyciel`, `typ` (`pochwala` / `uwaga` / `informacja`), `rodzaj`, `kategoria`, `uczen`, `entry_id` |
 | `librus_apix_nowe_zadanie` | `przedmiot`, `kategoria`, `termin`, `nauczyciel`, `uczen`, `entry_id`, a także `id`, `termin_iso`, `dni_do`, `pilnosc`, `tresc`, `dzien_tygodnia_terminu` |
 | `librus_apix_nowe_zdarzenie` | `data`, `tytul`, `przedmiot`, `godzina`, `typ`, `wazne`, `uczen`, `entry_id` |
 
 Nieobecność oznacza wpisy `nb` i `u` w dzienniku. Spóźnienia i zwolnienia jej nie wywołują, a samo usprawiedliwienie wcześniejszej nieobecności nie jest nową nieobecnością.
+
+Uwagi nie mają w Librusie identyfikatora, więc rozpoznajemy je po dacie, nauczycielu i treści. Dwa identyczne wpisy z tego samego dnia są traktowane jako osobne.
+
+### Nowa pochwała lub uwaga
+
+```yaml
+automation:
+  - alias: "Librus: uwaga lub pochwała"
+    trigger:
+      platform: event
+      event_type: librus_apix_nowa_uwaga
+    action:
+      - service: notify.mobile_app_TWOJ_TELEFON
+        data:
+          title: "{{ '👏' if trigger.event.data.typ == 'pochwala' else '⚠️' }} {{ trigger.event.data.uczen }}"
+          message: "{{ trigger.event.data.nauczyciel }}: {{ trigger.event.data.tresc }}"
+```
 
 ### Nowa ocena (dla wszystkich dzieci)
 
