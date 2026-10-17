@@ -1,66 +1,115 @@
-# 🎓 Librus APIX Integration for Home Assistant
+# 🎓 Librus Synergia dla Home Assistant
 
-Integracja Home Assistant z systemem Librus Synergia, umożliwiająca monitorowanie ocen, wiadomości i innych danych szkolnych.
+Integracja Home Assistant z dziennikiem **Librus Synergia**: oceny, średnie, frekwencja, terminarz, zadania domowe, wiadomości i plan lekcji w jednym miejscu, razem z gotowymi kartami Lovelace i zdarzeniami do powiadomień na telefon.
 
-## ✨ Funkcje
+> Projekt powstał jako fork [LukMaverick/LibrusSynergiaHA](https://github.com/LukMaverick/LibrusSynergiaHA) i jest rozwijany niezależnie. Dane z Librusa pobiera biblioteka [librus-apix](https://github.com/RustySnek/librus-apix).
 
-- 📊 **Monitoring ocen** - wszystkie oceny ze wszystkich przedmiotów
-- 📈 **Statystyki** - średnie ocen, liczba ocen, trend
-- 📧 **Wiadomości** - najnowsze wiadomości z dziennika
-- 🔔 **Powiadomienia** - automatyczne powiadomienia o nowych ocenach/wiadomościach
-- 📅 **Plan lekcji** - plan na dziś i jutro, widok tygodnia ze sprawdzianami, zadaniami i zastępstwami
-- 🏠 **Dashboard dla dzieci** - własna karta `custom:librus-card` (wbudowana w integrację)
+## ✨ Co potrafi
 
-## 🚀 Sensory
+| Obszar | Szczegóły |
+|--------|-----------|
+| 📊 **Oceny** | oceny z podziałem na przedmioty, średnia globalna i średnie z przedmiotów (z wykresami historii) |
+| 🕒 **Frekwencja** | procent frekwencji, liczba nieobecności, listy usprawiedliwionych i nieusprawiedliwionych |
+| 📅 **Plan lekcji** | dziś, jutro, następna lekcja i cały tydzień, scalone ze sprawdzianami, zadaniami i zastępstwami |
+| 🗓️ **Terminarz** | zdarzenia sklasyfikowane według typu (sprawdzian, kartkówka, wycieczka, dzień wolny...) |
+| 🏠 **Zadania domowe** | lista z pilnością oraz sensor „do zrobienia na jutro" i „co spakować do plecaka" |
+| 📬 **Wiadomości** | nadawca, temat, data i załączniki (treść nie jest pobierana, więc wiadomość nie zostaje oznaczona jako przeczytana) |
+| 🔔 **Zdarzenia** | nowa ocena, wiadomość, nieobecność, zadanie i wpis w terminarzu, gotowe do automatyzacji |
+| 🧒 **Dwie karty** | `librus-card` (dashboard dziecka) i `librus-terminarz-card` instalują się razem z integracją |
+| 👧👦 **Wielu uczniów** | każde dziecko to osobny wpis integracji, a zdarzenia niosą imię ucznia i `entry_id` |
 
-Integracja tworzy następujące sensory:
+## 📦 Instalacja
 
-| Sensor | Opis | Wartość |
-|--------|------|---------|
-| `sensor.informacje_o_uczniu` | Informacje o uczniu (klasa, wychowawca, szkoła) | imię i nazwisko |
-| `sensor.szczesliwy_numerek` | Szczęśliwy numerek dnia | numer |
-| `sensor.oceny` | Wszystkie oceny bieżącego semestru | liczba ocen |
-| `sensor.srednia_ocen` | **Globalna średnia** ze wszystkich przedmiotów | float (wykres 📈) |
-| `sensor.wiadomosci` | Ostatnie wiadomości (temat i nadawca) | liczba nieprzeczytanych |
-| `sensor.frekwencja` | **Frekwencja** w procentach (całość; atrybuty `semestr_1`, `semestr_2`) | float % (wykres 📈) |
-| `sensor.nieobecnosci` | Liczba nieobecności (atrybuty: `usprawiedliwione`, `nieusprawiedliwione`, `lista` ostatnich 30) | liczba nieobecności |
-| `sensor.terminarz` | Nadchodzące zdarzenia z terminarza | liczba zdarzeń |
-| `sensor.zadania` | Zadania domowe (bez przeterminowanych) | liczba zadań |
-| `sensor.<przedmiot>` | Oceny z danego przedmiotu (np. `sensor.matematyka`) | lista ocen: "4, 3+, 5" |
-| `sensor.srednia_<przedmiot>` | **Średnia** z danego przedmiotu (np. `sensor.srednia_matematyka`) | float (wykres 📈) |
+### HACS (zalecane)
 
-> Identyfikatory powstają z nazw encji. Jeśli Twoje wyglądają inaczej, sprawdź je w **Narzędzia deweloperskie → Stany**.
+[![Otwórz w HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mkrzych&repository=LibrusSynergiaHA&category=integration)
 
-### 📅 Plan lekcji i zadania (od v1.3.0)
+Albo ręcznie:
 
-Te sensory mają stałe, przewidywalne identyfikatory: `sensor.librus_<imię>_...`, gdzie `<imię>` to imię ucznia (np. `ola`). Dla drugiego dziecka (osobny wpis integracji) wystarczy zmienić imię.
+1. HACS → menu ⋮ → **Custom repositories**.
+2. URL: `https://github.com/mkrzych/LibrusSynergiaHA` (bez `.git` na końcu), kategoria: **Integration**.
+3. Znajdź **Librus Synergia HA**, zainstaluj i zrestartuj Home Assistant.
+
+> Błąd *„is not a valid app repository"* oznacza, że w kroku 2 wybrano złą kategorię (np. AppDaemon). Musi być **Integration**.
+
+### Ręcznie
+
+Skopiuj `custom_components/librus_apix` do katalogu `config/custom_components/` i zrestartuj Home Assistant.
+
+Wymagania: Home Assistant **2024.8.0** lub nowszy.
+
+## ⚙️ Konfiguracja
+
+1. **Ustawienia → Urządzenia i usługi → Dodaj integrację**.
+2. Wyszukaj **Librus APIX**.
+3. Podaj login i hasło do Librus Synergia.
+
+Dane odświeżają się **co 2 godziny**. Pierwsze uruchomienie tylko zapamiętuje stan, więc nie dostaniesz lawiny powiadomień o starych ocenach. Drugie dziecko dodajesz jako kolejny wpis integracji (jeden login = jeden wpis).
+
+## 🧩 Encje
+
+> Identyfikatory powstają z nazw w Librusie. Jeśli Twoje wyglądają inaczej, sprawdź je w **Narzędzia deweloperskie → Stany**.
+
+### Podstawowe
+
+| Sensor | Stan | Uwagi |
+|--------|------|-------|
+| `sensor.informacje_o_uczniu` | imię i nazwisko | klasa, wychowawca, szkoła w atrybutach |
+| `sensor.szczesliwy_numerek` | numer | |
+| `sensor.oceny` | liczba ocen | wszystkie oceny bieżącego semestru |
+| `sensor.srednia_ocen` | średnia globalna | wykres historii |
+| `sensor.<przedmiot>` | lista ocen, np. „4, 3+, 5" | |
+| `sensor.srednia_<przedmiot>` | średnia z przedmiotu | wykres historii |
+| `sensor.frekwencja` | % frekwencji | atrybuty `semestr_1`, `semestr_2` |
+| `sensor.nieobecnosci` | liczba nieobecności | `usprawiedliwione`, `nieusprawiedliwione`, `lista` (ostatnie 30) |
+| `sensor.wiadomosci` | liczba nieprzeczytanych | lista wiadomości w atrybutach |
+| `sensor.terminarz` | liczba zdarzeń | atrybuty opisane w sekcji `librus-terminarz-card` |
+| `sensor.sprawdziany` | sprawdziany i kartkówki w ciągu 7 dni | pod odznaki i automatyzacje |
+| `sensor.zadania` | liczba zadań (bez przeterminowanych) | |
+
+### Plan lekcji i zadania (od v1.3.0)
+
+Te sensory mają stałe nazwy `sensor.librus_<imię>_...`, gdzie `<imię>` to imię ucznia (np. `ola`).
 
 | Sensor | Stan | Najważniejsze atrybuty |
 |--------|------|------------------------|
-| `sensor.librus_<imię>_plan_dzis` | zakres godzin ("08:00–14:30") albo "Wolne" | `lekcje`, `przedmioty`, `liczba_sprawdzianow`, `wydarzenia_dnia`, `dzien_wolny` |
-| `sensor.librus_<imię>_plan_jutro` | jak wyżej, dla najbliższego dnia nauki (w piątek poniedziałek) | j.w. oraz `data`, `dzien`, `czy_jutro` |
-| `sensor.librus_<imię>_nastepna_lekcja` | przedmiot trwającej lub najbliższej lekcji, "Koniec lekcji", "Brak lekcji" | `od`, `do`, `sala`, `nauczyciel`, `trwa`, `sprawdzian` |
-| `sensor.librus_<imię>_plan_tygodnia` | zakres dat ("12.10–18.10") | `dni`, `numery_lekcji`, `godziny`, `entry_id` |
-| `sensor.librus_<imię>_do_zrobienia_jutro` | liczba zadań i sprawdzianów | `zadania`, `sprawdziany`, `przedmioty_do_spakowania`, `data` |
-| `sensor.librus_<imię>_zadania_otwarte` | liczba zadań od dziś | `zadania` (z `pilnosc`, `tresc`), `liczba_dzis`, `liczba_jutro`, `po_terminie` |
+| `..._plan_dzis` | zakres godzin („08:00–14:30") lub „Wolne" | `lekcje`, `przedmioty`, `liczba_sprawdzianow`, `wydarzenia_dnia`, `dzien_wolny` |
+| `..._plan_jutro` | jak wyżej, dla najbliższego dnia nauki | dodatkowo `data`, `dzien`, `czy_jutro` |
+| `..._nastepna_lekcja` | przedmiot trwającej lub najbliższej lekcji | `od`, `do`, `sala`, `nauczyciel`, `trwa`, `sprawdzian` |
+| `..._plan_tygodnia` | zakres dat („12.10–18.10") | `dni`, `numery_lekcji`, `godziny`, `entry_id` |
+| `..._do_zrobienia_jutro` | liczba zadań i sprawdzianów | `zadania`, `sprawdziany`, `przedmioty_do_spakowania`, `data` |
+| `..._zadania_otwarte` | liczba zadań od dziś | `zadania` (z `pilnosc`, `tresc`), `liczba_dzis`, `liczba_jutro`, `po_terminie` |
 
-`plan_tygodnia` domyślnie pokazuje najbliższy tydzień nauki: w sobotę, niedzielę i w piątek po ostatniej lekcji jest to **następny** tydzień, więc dziecko może przygotować się na cały tydzień. Plan jest scalony z terminarzem i zadaniami: lekcje mają znaczniki 📝 sprawdzian, 🏠 zadanie, ⚠ zastępstwo i ❌ odwołanie, a wycieczki, rady i dni wolne trafiają do `wydarzenia_dnia`.
+`plan_tygodnia` pokazuje najbliższy tydzień nauki, a od piątku po ostatniej lekcji (i w weekend) tydzień **następny**. Lekcje mają znaczniki: 📝 sprawdzian, 🏠 zadanie, ⚠ zastępstwo, ❌ odwołanie. Wycieczki, rady pedagogiczne i dni wolne trafiają do `wydarzenia_dnia`.
 
-Sensory średnich mają `state_class: measurement` — HA automatycznie rysuje dla nich wykres historyczny po kliknięciu w encję.
+### Usługa `librus_apix.pobierz_tydzien`
 
-## 🧒 Karta `librus-card` – dashboard dla dzieci
+Zwraca plan wybranego tygodnia scalony z terminarzem i zadaniami (`entry_id` znajdziesz w atrybutach `plan_tygodnia`). Bieżący i następny tydzień pochodzą z danych integracji, pozostałe są pobierane z Librusa i trzymane w pamięci przez godzinę. Z usługi korzysta karta przy przełączaniu tygodni.
 
-Razem z integracją instaluje się własna karta Lovelace (bez dodatkowej instalacji z HACS). Integracja sama dodaje ją do zasobów dashboardów (tryb *storage*); po aktualizacji odśwież stronę (Ctrl+Shift+R). W trybie YAML karta ładuje się automatycznie przez `add_extra_js_url`. Jeśli wolisz zasób ręcznie: `url: /librus_apix_static/librus-card.js`, `type: module`.
+## 🧒 Karty Lovelace
 
-Karta ma pięć widoków (`widok:`): `dzis`, `jutro`, `tydzien`, `zadania` (do odrobienia, z kolorami pilności) i `plecak` (przedmioty do spakowania + zadania i sprawdziany na jutro). Tydzień ma strzałki ◀ Teraz ▶ (od 2 tygodni wstecz do 4 w przód) i pokazuje cały nadchodzący tydzień w weekend.
+Obie karty są częścią integracji, więc nie trzeba niczego dodatkowo instalować z HACS. W trybie *storage* integracja sama dodaje je do zasobów dashboardów (po aktualizacji odśwież stronę: Ctrl+Shift+R). W trybie YAML:
+
+```yaml
+lovelace:
+  resources:
+    - url: /librus_apix_static/librus-card.js
+      type: module
+    - url: /librus_apix_static/librus-terminarz-card.js
+      type: module
+```
+
+### `librus-card`: dashboard dziecka
+
+Pięć widoków (`widok:`): `dzis`, `jutro`, `tydzien`, `zadania` (kolory pilności) i `plecak` (co spakować plus zadania i sprawdziany na jutro). Widok tygodnia ma strzałki ◀ Teraz ▶ (2 tygodnie wstecz, 4 w przód).
 
 ```yaml
 type: custom:librus-card
 widok: tydzien
-slug: ola              # imię ucznia z identyfikatorów sensor.librus_ola_*
+slug: ola              # imię z identyfikatorów sensor.librus_ola_*
 ```
 
-Kilkoro dzieci w jednej karcie (chipy z przełącznikiem, wybór jest zapamiętany na urządzeniu):
+Kilkoro dzieci w jednej karcie (przełącznik zapamiętuje wybór na urządzeniu):
 
 ```yaml
 type: custom:librus-card
@@ -75,13 +124,70 @@ przedmioty:                               # opcjonalne nadpisania wyglądu
   Matematyka: { emoji: "🔢", kolor: "210 70% 55%" }
 ```
 
-Podgląd karty bez Home Assistanta: uruchom `python3 -m http.server` w katalogu repo i otwórz `/custom_components/librus_apix/frontend/demo.html`.
+### `librus-terminarz-card`
 
-### Usługa `librus_apix.pobierz_tydzien`
+Terminarz pogrupowany po dniach (Dziś / Jutro / Środa, 14 paź), z ikonami typów, wyróżnionymi sprawdzianami, filtrami, podsumowaniem „2 sprawdziany w ciągu 7 dni" i widokiem miesiąca. Ma edytor wizualny.
 
-Karta używa jej do przełączania tygodni; możesz jej też użyć w automatyzacjach (`entry_id` jest atrybutem sensora `plan_tygodnia`). Zwraca plan tygodnia scalony z terminarzem i zadaniami. Bieżący i następny tydzień pochodzą z danych integracji, pozostałe są pobierane z Librusa i trzymane w pamięci przez godzinę.
+```yaml
+type: custom:librus-terminarz-card
+entity: sensor.terminarz       # puste = wykryj automatycznie
+tytul: Terminarz
+widok: agenda                  # agenda | miesiac
+dni: 30                        # horyzont agendy
+typy: [sprawdzian, kartkowka]  # opcjonalnie: sprawdzian, kartkowka, dzien_wolny, wycieczka, odwolane, rada, zebranie, inne
+filtry: true
+kompakt: false                 # jedna linia na zdarzenie
+pokaz_opis: true
+pokaz_nauczyciela: false
+max_zdarzen: 0                 # 0 = bez limitu
+```
 
-### Plan awaryjny bez karty (markdown)
+Jedna karta obsługuje jednego ucznia (jedną encję). Dla kilku dzieci dodaj osobne karty z różnym `entity`.
+
+Atrybuty `sensor.terminarz` (oprócz `zdarzenia`, `liczba_zdarzen`, `typy`): w każdym zdarzeniu `typ`, `ikona`, `wazne`, `dni_do`, `dzien_tygodnia`, `nauczyciel`, `opis`, a na poziomie sensora `typy_zdarzen`, `liczba_sprawdzianow_7_dni`, `najblizszy_sprawdzian`, `zakres_do`.
+
+### Podgląd bez Home Assistanta
+
+W katalogu repozytorium uruchom `python3 -m http.server` i otwórz `/custom_components/librus_apix/frontend/demo.html` lub `demo-terminarz.html`.
+
+### Prostsze karty z wbudowanych elementów
+
+Oceny i średnie:
+
+```yaml
+type: entities
+title: "📚 Oceny"
+entities:
+  - sensor.srednia_ocen
+  - sensor.oceny
+  - sensor.szczesliwy_numerek
+```
+
+Średnia z przedmiotu:
+
+```yaml
+type: gauge
+entity: sensor.srednia_matematyka
+name: Matematyka
+min: 1
+max: 6
+severity: { green: 4.5, yellow: 3, red: 0 }
+```
+
+Ostatnie wiadomości (markdown, bez dodatkowych kart):
+
+```yaml
+type: markdown
+title: 📬 Wiadomości
+content: >
+  {% for w in (state_attr('sensor.wiadomosci', 'wiadomosci') or [])[:5] %}
+  {{ '🔴' if w.nieprzeczytana else '⚪' }} **{{ w.temat }}**{{ ' 📎' if w.ma_zalacznik }}
+  {{ w.nadawca }} · {{ w.data }}
+
+  {% endfor %}
+```
+
+Plan tygodnia jako tabela (plan awaryjny bez karty):
 
 ```yaml
 type: markdown
@@ -99,11 +205,79 @@ content: >
   {% endfor %}
 ```
 
-### Prywatność
+## 🔔 Powiadomienia i automatyzacje
 
-`visible: - user: <id dziecka>` w widoku dashboardu ukrywa tylko zakładkę i **nie jest kontrolą dostępu**: konto dziecka mające dostęp do HA może odczytać wszystkie encje (także wiadomości) przez narzędzia deweloperskie lub API. Nie umieszczaj wiadomości na dashboardzie dziecka, a jeśli to ważne, ogranicz uprawnienia konta dziecka.
+Integracja wysyła zdarzenia Home Assistant przy każdym odświeżeniu danych. Możesz je przetestować bez czekania: **Narzędzia deweloperskie → Zdarzenia**, wpisz nazwę zdarzenia i dane, kliknij **Wyślij zdarzenie**.
 
-### Automatyzacje: plecak i zmiany w planie
+| Zdarzenie | Dane |
+|-----------|------|
+| `librus_apix_nowa_ocena` | `przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`, `uczen`, `entry_id` |
+| `librus_apix_nowa_wiadomosc` | `nadawca`, `temat`, `data`, `ma_zalacznik`, `uczen`, `entry_id` |
+| `librus_apix_nowa_nieobecnosc` | `data`, `przedmiot`, `numer_lekcji`, `typ`, `usprawiedliwiona`, `nauczyciel`, `temat` |
+| `librus_apix_nowe_zadanie` | `przedmiot`, `kategoria`, `termin`, `nauczyciel`, `uczen`, `entry_id`, a także `id`, `termin_iso`, `dni_do`, `pilnosc`, `tresc`, `dzien_tygodnia_terminu` |
+| `librus_apix_nowe_zdarzenie` | `data`, `tytul`, `przedmiot`, `godzina`, `typ`, `wazne`, `uczen`, `entry_id` |
+
+Nieobecność oznacza wpisy `nb` i `u` w dzienniku. Spóźnienia i zwolnienia jej nie wywołują, a samo usprawiedliwienie wcześniejszej nieobecności nie jest nową nieobecnością.
+
+### Nowa ocena (dla wszystkich dzieci)
+
+```yaml
+automation:
+  - alias: "Librus: nowa ocena"
+    trigger:
+      platform: event
+      event_type: librus_apix_nowa_ocena
+    action:
+      - service: notify.mobile_app_TWOJ_TELEFON
+        data:
+          title: "🎓 {{ trigger.event.data.uczen }}: {{ trigger.event.data.ocena }}"
+          message: >-
+            {{ trigger.event.data.przedmiot }} ({{ trigger.event.data.kategoria }}),
+            {{ trigger.event.data.nauczyciel }}
+```
+
+Tylko dla jednego dziecka, dodaj warunek:
+
+```yaml
+    condition:
+      - condition: template
+        value_template: "{{ trigger.event.data.uczen == 'Ola Kowalska' }}"
+```
+
+### Nowa nieobecność
+
+```yaml
+automation:
+  - alias: "Librus: nowa nieobecność"
+    trigger:
+      platform: event
+      event_type: librus_apix_nowa_nieobecnosc
+    action:
+      - service: notify.mobile_app_TWOJ_TELEFON
+        data:
+          title: "🚫 Librus: nieobecność"
+          message: >-
+            {{ trigger.event.data.data }}, lekcja {{ trigger.event.data.numer_lekcji }}:
+            {{ trigger.event.data.przedmiot }}
+            ({{ 'usprawiedliwiona' if trigger.event.data.usprawiedliwiona else 'nieusprawiedliwiona' }})
+```
+
+### Nowa wiadomość
+
+```yaml
+automation:
+  - alias: "Librus: nowa wiadomość"
+    trigger:
+      platform: event
+      event_type: librus_apix_nowa_wiadomosc
+    action:
+      - service: notify.mobile_app_TWOJ_TELEFON
+        data:
+          title: "📬 {{ trigger.event.data.nadawca }}"
+          message: "{{ trigger.event.data.temat }}"
+```
+
+### Wieczorne przypomnienie o plecaku
 
 ```yaml
 automation:
@@ -129,410 +303,28 @@ automation:
             {% endfor %}
 ```
 
-Zdarzenie `librus_apix_nowe_zadanie` zawiera teraz także `id`, `termin_iso`, `dni_do`, `pilnosc`, `tresc` i `dzien_tygodnia_terminu` (dotychczasowe pola bez zmian).
-
-## 📦 Instalacja
-
-### Opcja 1: HACS (Zalecana)
-
-Kliknij poniższy przycisk, aby automatycznie dodać repozytorium do HACS z właściwą kategorią:
-
-[![Otwórz w HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mkrzych&repository=LibrusSynergiaHA&category=integration)
-
-Lub ręcznie:
-
-1. Otwórz HACS w Home Assistant
-2. Kliknij trzy kropki (⋮) w prawym górnym rogu
-3. Wybierz **"Custom repositories"**
-4. W polu URL wpisz dokładnie: `https://github.com/mkrzych/LibrusSynergiaHA`  
-   ⚠️ **Bez `.git` na końcu!**
-5. W polu **Category** wybierz: **`Integration`**  
-   ⚠️ **NIE wybieraj "AppDaemon", "Plugin" ani żadnej innej opcji!**
-6. Kliknij **ADD**
-7. Znajdź **"Librus Synergia HA"** na liście i zainstaluj
-8. Restartuj Home Assistant
-
-> **Uwaga:** Błąd *"is not a valid app repository"* pojawia się, gdy w kroku 5 zostanie wybrana nieprawidłowa kategoria (np. "AppDaemon"). Upewnij się, że wybrano **Integration**.
-
-### Opcja 2: Instalacja manualna
-
-1. Skopiuj folder `custom_components/librus_apix` do `config/custom_components/`
-2. Restartuj Home Assistant
-3. Idź do Konfiguracja > Integracje > Dodaj integrację
-4. Wyszukaj "Librus APIX"
-
-## ⚙️ Konfiguracja
-
-1. W Home Assistant: **Konfiguracja** > **Integracje** > **Dodaj integrację**
-2. Wyszukaj **"Librus APIX"**  
-3. Podaj swoje dane logowania do Librus Synergia:
-   - **Login/Username**: Twój login do Librus
-   - **Hasło**: Twoje hasło do Librus
-4. Kliknij **"Prześlij"**
-
-## 🔧 Środowisko testowe
-
-Projekt zawiera local środowisko testowe z Docker:
-
-```bash
-# Uruchom środowisko testowe
-docker-compose up -d
-
-# Home Assistant dostępny pod: http://localhost:8123
-# Code Server dostępny pod: http://localhost:8443 (hasło: homeassistant)
-```
-
-## 📊 Przykładowe karty Lovelace
-
-### Karta ocen i średnich
-```yaml
-type: entities
-title: "📚 Oceny Librus"
-entities:
-  - entity: sensor.srednia_ocen
-    name: "Globalna średnia"
-  - entity: sensor.oceny
-    name: "Liczba ocen"
-  - entity: sensor.szczesliwy_numerek
-    name: "Szczęśliwy numerek"
-```
-
-### Karta wiadomości (Mushroom)
-
-> **Wymagane:** [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom) zainstalowane przez HACS.
-
-#### Jak znaleźć nazwę swojej encji?
-1. Idź do **Developer Tools → States**
-2. Wyszukaj `wiadomosci`
-3. Skopiuj pełną nazwę encji (np. `sensor.wiadomosci`)
-4. Zamień `sensor.wiadomosci` poniżej na swoją nazwę
-
-```yaml
-type: vertical-stack
-cards:
-  - type: custom:mushroom-title-card
-    title: 📬 Wiadomości Librus
-    subtitle: >
-      {% set n = state_attr('sensor.wiadomosci', 'liczba_nieprzeczytanych') %}
-      {% if n > 0 %}{{ n }} nieprzeczytanych{% else %}Wszystkie przeczytane{% endif %}
-
-  - type: custom:mushroom-template-card
-    primary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[0].temat | default('brak') }}
-    secondary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[0].nadawca | default('') }}
-      · {{ state_attr('sensor.wiadomosci', 'wiadomosci')[0].data | default('') }}
-    icon: mdi:message-text
-    icon_color: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[0].nieprzeczytana %}red{% else %}grey{% endif %}
-    badge_icon: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[0].ma_zalacznik %}mdi:paperclip{% endif %}
-
-  - type: custom:mushroom-template-card
-    primary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[1].temat | default('brak') }}
-    secondary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[1].nadawca | default('') }}
-      · {{ state_attr('sensor.wiadomosci', 'wiadomosci')[1].data | default('') }}
-    icon: mdi:message-text
-    icon_color: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[1].nieprzeczytana %}red{% else %}grey{% endif %}
-    badge_icon: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[1].ma_zalacznik %}mdi:paperclip{% endif %}
-
-  - type: custom:mushroom-template-card
-    primary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[2].temat | default('brak') }}
-    secondary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[2].nadawca | default('') }}
-      · {{ state_attr('sensor.wiadomosci', 'wiadomosci')[2].data | default('') }}
-    icon: mdi:message-text
-    icon_color: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[2].nieprzeczytana %}red{% else %}grey{% endif %}
-    badge_icon: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[2].ma_zalacznik %}mdi:paperclip{% endif %}
-
-  - type: custom:mushroom-template-card
-    primary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[3].temat | default('brak') }}
-    secondary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[3].nadawca | default('') }}
-      · {{ state_attr('sensor.wiadomosci', 'wiadomosci')[3].data | default('') }}
-    icon: mdi:message-text
-    icon_color: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[3].nieprzeczytana %}red{% else %}grey{% endif %}
-    badge_icon: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[3].ma_zalacznik %}mdi:paperclip{% endif %}
-
-  - type: custom:mushroom-template-card
-    primary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[4].temat | default('brak') }}
-    secondary: >
-      {{ state_attr('sensor.wiadomosci', 'wiadomosci')[4].nadawca | default('') }}
-      · {{ state_attr('sensor.wiadomosci', 'wiadomosci')[4].data | default('') }}
-    icon: mdi:message-text
-    icon_color: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[4].nieprzeczytana %}red{% else %}grey{% endif %}
-    badge_icon: >
-      {% if state_attr('sensor.wiadomosci', 'wiadomosci')[4].ma_zalacznik %}mdi:paperclip{% endif %}
-```
-
-Legenda ikon:
-- 🔴 czerwona = nieprzeczytana
-- ⚫ szara = przeczytana
-- 📎 badge = ma załącznik
-
-### Karta terminarza (wszystkie zdarzenia)
-
-> Znajdź nazwę encji w **Developer Tools → States** (szukaj `terminarz`).
-
-```yaml
-type: markdown
-title: 📅 Terminarz
-content: >
-  {% set zdarzenia = state_attr('sensor.terminarz',
-  'zdarzenia') %} {% if zdarzenia %} | Data | Dzień | Typ | Przedmiot | Opis |
-   |------|-------|-----|-----------|------|
-  {% for z in zdarzenia %} | **{{ z.data }}** | {{ z.tydzien }} | {{ z.tytul }}
-  | {{ z.przedmiot }} | {{ z.szczegoly.Opis if z.szczegoly.Opis != 'unknown'
-  else '' }} |
-
-  {% endfor %} {% else %} Brak nadchodzących zdarzeń. {% endif %}
-```
-
-### Karta sprawdzianów i klasówek (bez dni wolnych)
-
-```yaml
-type: markdown
-title: 📝 Sprawdziany i klasówki
-content: >
-  {% set zdarzenia = state_attr('sensor.terminarz',
-  'zdarzenia') %} {% set typy_testow = ['Sprawdzian', 'Kartkówka', 'Klasówka',
-  'Praca klasowa'] %} {% set sprawdziany = zdarzenia | selectattr('tytul', 'in',
-  typy_testow) | list %} {% if sprawdziany %} | Data | Dzień | Typ | Przedmiot |
-  Opis |
-   |------|-------|-----|-----------|------|
-  {% for z in sprawdziany %} | **{{ z.data }}** | {{ z.tydzien }} | {{ z.tytul
-  }} | {{ z.przedmiot }} | {{ z.szczegoly.Opis if z.szczegoly.Opis != 'unknown'
-  else '' }} |
-
-  {% endfor %} {% else %} Brak nadchodzących zdarzeń. {% endif %}
-```
-
-### Wykres średniej z przedmiotu (Gauge)
-```yaml
-type: gauge
-entity: sensor.srednia_matematyka
-name: "Matematyka - średnia"
-min: 1
-max: 6
-severity:
-  green: 4.5
-  yellow: 3
-  red: 0
-```
-
-### 🗓️ Karta terminarza (`librus-terminarz-card`)
-
-Własna karta Lovelace dostarczana razem z integracją: terminarz pogrupowany po dniach (Dziś / Jutro / Środa, 14 paź),
-z ikonami typów, wyróżnionymi sprawdzianami, chipsami filtrów, podsumowaniem „2 sprawdziany w ciągu 7 dni” i widokiem miesiąca.
-
-Karta rejestruje się sama (zasób `/librus_apix_static/librus-terminarz-card.js` w trybie storage). W trybie YAML dodaj zasób ręcznie:
-
-```yaml
-lovelace:
-  resources:
-    - url: /librus_apix_static/librus-terminarz-card.js
-      type: module
-```
-
-```yaml
-type: custom:librus-terminarz-card
-entity: sensor.terminarz     # puste = wykryj automatycznie
-tytul: Terminarz
-widok: agenda                # agenda | miesiac
-dni: 30                      # horyzont agendy
-typy: [sprawdzian, kartkowka]  # opcjonalnie: sprawdzian, kartkowka, dzien_wolny, wycieczka, odwolane, rada, zebranie, inne
-filtry: true                 # chipsy filtrów
-kompakt: false               # jedna linia na zdarzenie
-pokaz_opis: true
-pokaz_nauczyciela: false
-max_zdarzen: 0               # 0 = bez limitu
-```
-
-Jedna karta = jeden uczeń (jedna encja). Dla kilkorga dzieci dodaj osobne karty z różnym `entity`.
-Karta ma też edytor wizualny. Podgląd bez Home Assistanta: `custom_components/librus_apix/frontend/demo-terminarz.html`
-(`python3 -m http.server`).
-
-Sensor `Terminarz` ma teraz dodatkowe atrybuty (dotychczasowe `zdarzenia`, `liczba_zdarzen`, `typy` bez zmian):
-`typ`, `ikona`, `wazne`, `dni_do`, `dzien_tygodnia`, `nauczyciel`, `opis` w każdym zdarzeniu oraz
-`typy_zdarzen`, `liczba_sprawdzianow_7_dni`, `najblizszy_sprawdzian`, `zakres_do`.
-Nowy sensor `Sprawdziany` (stan = liczba sprawdzianów i kartkówek w 7 dni) nadaje się do odznak i automatyzacji:
-
-```yaml
-trigger:
-  - platform: time
-    at: "18:00:00"
-condition:
-  - condition: template
-    value_template: "{{ state_attr('sensor.terminarz', 'najblizszy_sprawdzian').dni_do == 1 }}"
-action:
-  - service: notify.mobile_app_telefon
-    data:
-      message: "Jutro sprawdzian: {{ state_attr('sensor.terminarz', 'najblizszy_sprawdzian').przedmiot }}"
-```
-
-Zdarzenie `librus_apix_nowe_zdarzenie` ma teraz dodatkowo pola `typ` i `wazne`.
-
-## 🔔 Automatyzacje powiadomień na telefon
-
-Integracja wysyła zdarzenia Home Assistant gdy pojawi się nowa wiadomość lub ocena.
-Zdarzenia są wykrywane przy każdym odświeżeniu (co 2h). Pierwsze uruchomienie tylko zapamiętuje stan — **nie wysyła duplikatów**.
-
-> **Test bez czekania:** Idź do **Developer Tools → Events**, Event type: `librus_apix_nowa_wiadomosc`, Event data jak poniżej i kliknij **Fire Event**.
-
-### 📬 Powiadomienie o nowej wiadomości
-
-Zdarzenie: `librus_apix_nowa_wiadomosc`  
-Dostępne dane: `nadawca`, `temat`, `data`, `ma_zalacznik`, `uczen`, `entry_id`
-
-> **Uwaga:** Treść wiadomości nie jest pobierana celowo — aby nie oznaczać wiadomości jako przeczytanych w Librusie.
+### Dzień przed sprawdzianem
 
 ```yaml
 automation:
-  - alias: "Librus - nowa wiadomosc"
+  - alias: "Librus: jutro sprawdzian"
     trigger:
-      - platform: event
-        event_type: librus_apix_nowa_wiadomosc
-    action:
-      - service: notify.mobile_app_NAZWA_TWOJEGO_TELEFONU
-        data:
-          title: "📬 Librus: nowa wiadomość"
-          message: >-
-            {% set msg = state_attr('sensor.librus_IMIE_NAZWISKO_wiadomosci', 'wiadomosci')
-               | selectattr('nieprzeczytana', 'equalto', true) | list | first | default({}) %}
-            Od: {{ msg.nadawca | default('nieznany') }}
-            Temat: {{ msg.temat | default('brak') }}
-```
-
-> **Uwaga:** Zamień `sensor.librus_IMIE_NAZWISKO_wiadomosci` na nazwę swojego sensora widoczną w Developer Tools → States.
-
-### 📝 Powiadomienie o nowej ocenie
-
-Zdarzenie: `librus_apix_nowa_ocena`  
-Dostępne dane: `przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`, `uczen`, `entry_id`
-
-```yaml
-automation:
-  - alias: "Librus - nowa ocena"
-    trigger:
-      platform: event
-      event_type: librus_apix_nowa_ocena
-    action:
-      - service: notify.mobile_app_NAZWA_TWOJEGO_TELEFONU
-        data:
-          title: "🎓 Librus: nowa ocena {{ trigger.event.data.ocena }}"
-          message: >-
-            {{ trigger.event.data.przedmiot }}
-            Ocena: {{ trigger.event.data.ocena }}
-            Kategoria: {{ trigger.event.data.kategoria }}
-            Nauczyciel: {{ trigger.event.data.nauczyciel }}
-```
-
-### 🚫 Powiadomienie o nowej nieobecności
-
-Zdarzenie: `librus_apix_nowa_nieobecnosc`  
-Dostępne dane: `data`, `przedmiot`, `numer_lekcji`, `typ`, `usprawiedliwiona`, `nauczyciel`, `temat`
-
-Zdarzenie dotyczy nieobecności (oznaczenia `nb` i `u` w dzienniku) — spóźnienia i zwolnienia go nie wywołują. Samo usprawiedliwienie wcześniej zgłoszonej nieobecności nie jest nową nieobecnością.
-
-```yaml
-automation:
-  - alias: "Librus - nowa nieobecnosc"
-    trigger:
-      platform: event
-      event_type: librus_apix_nowa_nieobecnosc
-    action:
-      - service: notify.mobile_app_NAZWA_TWOJEGO_TELEFONU
-        data:
-          title: "🚫 Librus: nowa nieobecność"
-          message: >-
-            {{ trigger.event.data.data }}, lekcja {{ trigger.event.data.numer_lekcji }}:
-            {{ trigger.event.data.przedmiot }}
-            ({{ 'usprawiedliwiona' if trigger.event.data.usprawiedliwiona else 'nieusprawiedliwiona' }})
-```
-
-
-### 👧👦 Kilkoro dzieci - filtrowanie po uczniu
-
-Każde zdarzenie zawiera pola `uczen` (imię i nazwisko z Librusa) oraz `entry_id` (wpis integracji w HA), więc przy kilku kontach można rozdzielić powiadomienia. Każde dziecko to osobny wpis integracji (jeden login = jeden wpis; ten sam login nie może zostać dodany dwa razy).
-
-Jedna automatyzacja dla wszystkich dzieci (uczeń w tytule):
-
-```yaml
-automation:
-  - alias: "Librus - nowa ocena (wszystkie dzieci)"
-    trigger:
-      platform: event
-      event_type: librus_apix_nowa_ocena
-    action:
-      - service: notify.mobile_app_NAZWA_TWOJEGO_TELEFONU
-        data:
-          title: "🎓 {{ trigger.event.data.uczen }}: nowa ocena {{ trigger.event.data.ocena }}"
-          message: "{{ trigger.event.data.przedmiot }} ({{ trigger.event.data.kategoria }})"
-```
-
-Osobne powiadomienia dla wybranego dziecka (filtr w warunku):
-
-```yaml
-automation:
-  - alias: "Librus - nowa ocena Ola"
-    trigger:
-      platform: event
-      event_type: librus_apix_nowa_ocena
+      - platform: time
+        at: "18:00:00"
     condition:
       - condition: template
-        value_template: "{{ trigger.event.data.uczen == 'Ola Kowalska' }}"
+        value_template: "{{ state_attr('sensor.terminarz', 'najblizszy_sprawdzian').dni_do == 1 }}"
     action:
-      - service: notify.mobile_app_TELEFON_OLI
+      - service: notify.mobile_app_TWOJ_TELEFON
         data:
-          message: "{{ trigger.event.data.przedmiot }}: {{ trigger.event.data.ocena }}"
+          message: "Jutro sprawdzian: {{ state_attr('sensor.terminarz', 'najblizszy_sprawdzian').przedmiot }}"
 ```
 
-### ✅ Pozostałe zdarzenia
+> Nazwę telefonu znajdziesz w **Ustawienia → Urządzenia i usługi → Mobile App** (np. `notify.mobile_app_samsung_galaxy_s24`).
 
-- `librus_apix_nowe_zadanie` - dane: `przedmiot`, `kategoria`, `termin`, `nauczyciel`, `uczen`, `entry_id`
-- `librus_apix_nowe_zdarzenie` (terminarz) - dane: `data`, `tytul`, `przedmiot`, `godzina`, `uczen`, `entry_id`
+## 🩺 Rozwiązywanie problemów
 
-> **Gdzie znaleźć nazwę telefonu?** HA → Settings → Devices & Services → Mobile App → nazwa urządzenia (np. `notify.mobile_app_samsung_galaxy_s24`)
-
-## 🛠️ Rozwój
-
-### Wymagania
-- Python 3.9+
-- Home Assistant 2023.1+
-- librus-apix library
-
-### Setup środowiska deweloperskiego
-```bash
-# Klonuj repozytorium
-git clone https://github.com/mkrzych/LibrusSynergiaHA
-cd LibrusSynergiaHA
-
-# Uruchom środowisko testowe
-docker-compose up -d
-
-# Edytuj kod w Code Server (http://localhost:8443)
-```
-
-### Uruchomienie testów
-```bash
-pytest tests/
-```
-
-## 📝 Logi
-
-Aby włączyć szczegółowe logi, dodaj do `configuration.yaml`:
+**Włączenie logów debug** (`configuration.yaml`):
 
 ```yaml
 logger:
@@ -540,42 +332,40 @@ logger:
     custom_components.librus_apix: debug
 ```
 
-## ⚠️ Bezpieczeństwo
+**Błąd logowania.** Sprawdź login i hasło w przeglądarce. Po zmianach po stronie Librusa może być potrzebna nowsza wersja `librus-apix`. Integracja wymaga `>=1.5.2`.
 
-- **Nie udostępniaj swoich danych logowania!**  
-- Dane są przechowywane lokalnie w Home Assistant
-- Komunikacja z Librus odbywa się przez bezpieczne API
-- Hasła są zaszyfrowane w konfiguracji
+**Nie widzę encji.** Szukaj po części nazwy w **Narzędzia deweloperskie → Stany**. Nazwy zależą od języka i danych w dzienniku.
 
-## 🐛 Zgłaszanie błędów
+**Karta się nie ładuje.** Odśwież stronę z pominięciem pamięci podręcznej (Ctrl+Shift+R) i sprawdź, czy zasób `/librus_apix_static/...` jest na liście zasobów dashboardu.
 
-Jeśli znajdziesz błąd:
+**Zgłaszanie błędów.** Otwórz [issue](https://github.com/mkrzych/LibrusSynergiaHA/issues) z opisem problemu, krokami do odtworzenia i logami (usuń dane osobowe!).
 
-1. Włącz logi debug (patrz wyżej)
-2. Skopiuj logi z błędem
-3. Utwórz issue na GitHub z:
-   - Opisem problemu
-   - Krokami do reprodukcji
-   - Logami (usuń dane osobowe!)
+## 🛠️ Rozwój
 
-## 📄 Licencja
+```bash
+git clone https://github.com/mkrzych/LibrusSynergiaHA
+cd LibrusSynergiaHA
 
-MIT License - patrz [LICENSE](LICENSE)
+# środowisko testowe z Home Assistantem i Code Server
+docker-compose up -d
+# Home Assistant: http://localhost:8123, Code Server: http://localhost:8443
 
-## 🤝 Wkład
+# testy logiki (z atrapami HA)
+pip install -r requirements_test.txt
+pytest tests/
+```
 
-Pull requesty i zgłoszenia błędów są mile widziane – użyj [Issues](https://github.com/mkrzych/LibrusSynergiaHA/issues).
+W CI działają trzy workflowy: testy (`tests.yml`), `hassfest` oraz walidacja HACS (`validate.yml`). Pull requesty są mile widziane.
 
-### 🙏 Podziękowania
+## 🛡️ Bezpieczeństwo i prywatność
 
-Specjalne podziękowania dla **KB** za wsparcie i pomoc w rozwoju projektu.
+- Dane logowania trafiają do magazynu Home Assistant na Twoim serwerze i nigdzie poza Librus nie są wysyłane. Home Assistant nie szyfruje ich w konfiguracji, więc zabezpiecz kopie zapasowe i dostęp do `.storage`.
+- Biblioteka `librus-apix` korzysta z portalu Librus Synergia. Nie jest to oficjalne API, więc zmiany po stronie Librusa mogą chwilowo psuć integrację.
+- `visible: - user: <id dziecka>` w widoku dashboardu ukrywa tylko zakładkę i **nie jest kontrolą dostępu**. Konto dziecka z dostępem do HA może odczytać wszystkie encje (także wiadomości) przez narzędzia deweloperskie lub API. Nie umieszczaj wiadomości na dashboardzie dziecka, a jeśli to ważne, ogranicz uprawnienia jego konta.
+- Treść wiadomości nie jest pobierana, żeby nie oznaczać ich jako przeczytanych w Librusie.
 
-## 👨‍💻 Autor
+## 📄 Licencja i pochodzenie
 
-Rozwijane przez [Marcina Krzycha](https://github.com/mkrzych).
+Licencja [MIT](LICENSE). Projekt rozwija [Marcin Krzych](https://github.com/mkrzych) jako fork [LukMaverick/LibrusSynergiaHA](https://github.com/LukMaverick/LibrusSynergiaHA) (MIT). Dane z Librusa pobiera [librus-apix](https://github.com/RustySnek/librus-apix) autorstwa RustySnek.
 
-Projekt jest forkiem [LukMaverick/LibrusSynergiaHA](https://github.com/LukMaverick/LibrusSynergiaHA) (licencja MIT) i rozwija się niezależnie. Korzysta z biblioteki [librus-apix](https://github.com/RustySnek/librus-apix).
-
----
-
-**⭐ Jeśli podoba Ci się projekt, zostaw gwiazdkę na GitHub!**
+Projekt nie jest związany z firmą Librus ani przez nią wspierany.
