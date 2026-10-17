@@ -8,7 +8,6 @@ pytest-asyncio>=0.20.0
 
 # Librus APIX library
 librus-apix>=1.5.2
-aiohttp>=3.8.0
 
 # Development tools
 black>=22.0.0
