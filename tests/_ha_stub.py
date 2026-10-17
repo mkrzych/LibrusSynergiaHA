@@ -54,14 +54,17 @@ class SensorEntity:
 
 
 class Store:
-    wczytane = None
+    wczytane = None  # zawartosc Store z trescia zadan (klucz konczy sie na _tresci)
+    wczytane_wg_klucza = {}  # zawartosc Store o dokladnym kluczu (np. ..._seen)
 
     def __init__(self, hass, version, key):
         self.key = key
         self.zapisane = None
 
     async def async_load(self):
-        return Store.wczytane
+        if self.key in Store.wczytane_wg_klucza:
+            return Store.wczytane_wg_klucza[self.key]
+        return Store.wczytane if self.key.endswith("_tresci") else None
 
     async def async_save(self, dane):
         self.zapisane = dane
