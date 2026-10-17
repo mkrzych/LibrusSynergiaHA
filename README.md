@@ -16,6 +16,7 @@ Integracja Home Assistant z dziennikiem **Librus Synergia**: oceny, średnie, fr
 | 💬 **Uwagi nauczycieli** | pochwały i uwagi z dziennika (data, nauczyciel, treść, kategoria), liczniki i lista ostatnich wpisów |
 | 📬 **Wiadomości** | nadawca, temat, data i załączniki (treść nie jest pobierana, więc wiadomość nie zostaje oznaczona jako przeczytana) |
 | 🔔 **Zdarzenia** | nowa ocena, wiadomość, nieobecność, uwaga lub pochwała, zadanie i wpis w terminarzu, gotowe do automatyzacji |
+| 📲 **Blueprinty** | gotowe powiadomienia na telefon importowane jednym kliknięciem: nowości w dzienniku, wieczorny plecak, przypomnienie przed sprawdzianem, zmiany w planie |
 | 🧒 **Dwie karty** | `librus-card` (dashboard dziecka) i `librus-terminarz-card` instalują się razem z integracją |
 | 👧👦 **Wielu uczniów** | każde dziecko to osobny wpis integracji, a zdarzenia niosą imię ucznia i `entry_id` |
 
@@ -209,13 +210,32 @@ content: >
 
 ## 🔔 Powiadomienia i automatyzacje
 
+### Gotowe blueprinty (najprościej)
+
+Blueprint to gotowa automatyzacja, w której wybierasz tylko telefon i kilka opcji, bez pisania YAML-a. Kliknij **Importuj blueprint**, potwierdź w Home Assistancie, a potem **Ustawienia → Automatyzacje i sceny → Dodaj automatyzację** i wybierz Librus z listy blueprintów.
+
+| Blueprint | Co robi | Import |
+|-----------|---------|--------|
+| **Nowości w dzienniku** | ocena, wiadomość, nieobecność, uwaga lub pochwała, zadanie, wpis w terminarzu; filtr po dziecku, wybór rodzajów, opcjonalnie tylko niskie oceny | [![Importuj blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmkrzych%2FLibrusSynergiaHA%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Flibrus_apix%2Fpowiadomienia_zdarzenia.yaml) |
+| **Wieczorny plecak** | o ustalonej godzinie: przedmioty do spakowania, zadania i sprawdziany na następny dzień nauki (w dni wolne cisza) | [![Importuj blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmkrzych%2FLibrusSynergiaHA%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Flibrus_apix%2Fwieczorny_plecak.yaml) |
+| **Przed sprawdzianem** | przypomnienie o sprawdzianach i kartkówkach za wybraną liczbę dni (domyślnie jutro) | [![Importuj blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmkrzych%2FLibrusSynergiaHA%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Flibrus_apix%2Fdzien_przed_sprawdzianem.yaml) |
+| **Zmiany w planie** | rano: lekcje odwołane i zastępstwa na dziś | [![Importuj blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmkrzych%2FLibrusSynergiaHA%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Flibrus_apix%2Fzmiany_w_planie.yaml) |
+
+- Telefon wybierasz z listy urządzeń z aplikacją Home Assistant, nie trzeba znać nazwy usługi `notify.mobile_app_...`.
+- Blueprint „Nowości w dzienniku" reaguje na zdarzenia z tabeli poniżej. W polu **Tylko to dziecko** wpisz imię i nazwisko jak w sensorze „Informacje o uczniu" albo zostaw puste. Pole **Oceny tylko do progu** pozwala dostawać tylko niskie oceny: przy progu 3 przyjdą 1, 2+ i 3, ale nie 3+ (plus liczy się jako +0,5, minus jako −0,25), a oceny nieliczbowe, np. „np", są pomijane.
+- Pozostałe trzy działają o wybranej godzinie i czytają sensory planu i terminarza, które wskazujesz w formularzu. Mają jedno dziecko na automatyzację, więc przy dwójce dzieci utwórz po jednej dla każdego.
+- Dane odświeżają się co 2 godziny, więc zmiana w planie wpisana w Librusie po godzinie z blueprintu „Zmiany w planie" dotrze dopiero przy następnym odświeżeniu.
+- Importowane są wersje z gałęzi `main`. Pliki znajdziesz w katalogu [`blueprints/automation/librus_apix`](blueprints/automation/librus_apix).
+
+### Własne automatyzacje na zdarzeniach
+
 Integracja wysyła zdarzenia Home Assistant przy każdym odświeżeniu danych. Możesz je przetestować bez czekania: **Narzędzia deweloperskie → Zdarzenia**, wpisz nazwę zdarzenia i dane, kliknij **Wyślij zdarzenie**.
 
 | Zdarzenie | Dane |
 |-----------|------|
 | `librus_apix_nowa_ocena` | `przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`, `uczen`, `entry_id` |
 | `librus_apix_nowa_wiadomosc` | `nadawca`, `temat`, `data`, `ma_zalacznik`, `uczen`, `entry_id` |
-| `librus_apix_nowa_nieobecnosc` | `data`, `przedmiot`, `numer_lekcji`, `typ`, `usprawiedliwiona`, `nauczyciel`, `temat` |
+| `librus_apix_nowa_nieobecnosc` | `data`, `przedmiot`, `numer_lekcji`, `typ`, `usprawiedliwiona`, `nauczyciel`, `temat`, `uczen`, `entry_id` |
 | `librus_apix_nowa_uwaga` | `tresc`, `data`, `nauczyciel`, `typ` (`pochwala` / `uwaga` / `informacja`), `rodzaj`, `kategoria`, `uczen`, `entry_id` |
 | `librus_apix_nowe_zadanie` | `przedmiot`, `kategoria`, `termin`, `nauczyciel`, `uczen`, `entry_id`, a także `id`, `termin_iso`, `dni_do`, `pilnosc`, `tresc`, `dzien_tygodnia_terminu` |
 | `librus_apix_nowe_zdarzenie` | `data`, `tytul`, `przedmiot`, `godzina`, `typ`, `wazne`, `uczen`, `entry_id` |
