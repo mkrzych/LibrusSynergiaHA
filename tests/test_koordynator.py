@@ -86,6 +86,7 @@ def czas(monkeypatch):
 @pytest.fixture
 def koordynator(czas):
     _ha_stub.Store.wczytane = None
+    _ha_stub.Store.wczytane_wg_klucza = {}
     hass = MagicMock()
     klient = FakeClient()
     k = sensor.LibrusDataUpdateCoordinator(hass, klient, SimpleNamespace(entry_id="e1"))
@@ -313,3 +314,104 @@ def test_terminarz_sensor_pokazuje_tylko_przyszle(koordynator, czas):
     czas["now"] = datetime(2026, 10, 16, 8, 0, tzinfo=timezone.utc)
     s = sensor.LibrusTerminarzSensor(k, wpis)
     assert {z["data"] for z in s.extra_state_attributes["zdarzenia"]} == {"2026-10-16"}
+
+
+# ----------------------------------------------------- trwala deduplikacja (Store seen)
+
+def _nowy_koordynator(klient):
+    return sensor.LibrusDataUpdateCoordinator(MagicMock(), klient, SimpleNamespace(entry_id="e1"))
+
+
+def _zdarzenia(hass, nazwa):
+    return [c.args[1] for c in hass.bus.fire.call_args_list if c.args[0] == nazwa]
+
+
+def test_seen_jest_zapisywane_jako_json(koordynator):
+    import json
+    k, _, _ = koordynator
+    odswiez(k)
+    zapisane = k._seen_store.zapisane
+    assert zapisane["oceny"] == ["Matematyka|2026-10-01|5"]
+    assert zapisane["frekwencja_zaladowana"] is True
+    json.dumps(zapisane)
+
+
+def test_po_restarcie_nowe_elementy_z_przerwy_sa_oglaszane(koordynator):
+    k, klient, _ = koordynator
+    odswiez(k)
+    _ha_stub.Store.wczytane_wg_klucza = {k._seen_store.key: k._seen_store.zapisane}
+    klient.homework.append(homework(subject="Fizyka", category="Zadanie domowe", teacher="X", lesson="1",
+                                    task_date="2026-10-14", completion_date="2026-10-15", href="z9"))
+    k2 = _nowy_koordynator(klient)
+    odswiez(k2)
+    zadania = _zdarzenia(k2.hass, sensor.EVENT_NOWE_ZADANIE)
+    assert [z["id"] for z in zadania] == ["z9"]  # stare zadania nie sa ogloszone ponownie
+
+
+def test_bez_zapisanego_stanu_pierwszy_cykl_jest_cichy(koordynator):
+    k, klient, _ = koordynator
+    odswiez(k)
+    k2 = _nowy_koordynator(klient)  # Store seen pusty (jak po aktualizacji z 1.3.0)
+    odswiez(k2)
+    k2.hass.bus.fire.assert_not_called()
+
+
+def test_uszkodzony_store_seen_traktowany_jak_brak(koordynator):
+    k, klient, _ = koordynator
+    _ha_stub.Store.wczytane_wg_klucza = {"librus_apix_e1_seen": ["cos", "nie tak"]}
+    odswiez(k)
+    k.hass.bus.fire.assert_not_called()
+
+
+def test_terminarz_dwa_wpisy_o_tym_samym_tytule_ale_innym_href_to_dwa_zdarzenia(koordynator):
+    k, klient, hass = koordynator
+    base = {"data": "2026-10-20", "tytul": "Sprawdzian", "przedmiot": "Fizyka", "godzina": "",
+            "numer_lekcji": "", "szczegoly": "", "tydzien": ""}
+    klient.terminarz = [{**base, "href": "t1"}]
+    odswiez(k)
+    klient.terminarz = [{**base, "href": "t1"}, {**base, "href": "t2"}]
+    odswiez(k)
+    assert len(_zdarzenia(hass, sensor.EVENT_NOWE_ZDARZENIE)) == 1
+
+
+def test_terminarz_zmiana_tytulu_przy_tym_samym_href_nie_jest_nowym_zdarzeniem(koordynator):
+    k, klient, hass = koordynator
+    base = {"data": "2026-10-20", "przedmiot": "Fizyka", "godzina": "",
+            "numer_lekcji": "", "szczegoly": "", "tydzien": "", "href": "t1"}
+    klient.terminarz = [{**base, "tytul": "Sprawdzian"}]
+    odswiez(k)
+    klient.terminarz = [{**base, "tytul": "Sprawdzian (zmiana sali)"}]
+    odswiez(k)
+    assert _zdarzenia(hass, sensor.EVENT_NOWE_ZDARZENIE) == []
+
+
+def test_przycinanie_usuwa_znikniete_klucze_ale_nie_przy_bledzie_zrodla(koordynator):
+    k, klient, _ = koordynator
+    odswiez(k)
+    assert len(k._seen_homework_ids) == 5
+    klient.homework_ok = False  # blad pobierania - bez przycinania
+    odswiez(k)
+    assert len(k._seen_homework_ids) == 5
+    klient.homework_ok = True
+    klient.homework = klient.homework[:2]
+    odswiez(k)
+    assert len(k._seen_homework_ids) == 2
+    assert len(k._seen_store.zapisane["zadania"]) == 2
+
+
+def test_limit_lawiny_po_restarcie(koordynator):
+    k, klient, _ = koordynator
+    odswiez(k)
+    _ha_stub.Store.wczytane_wg_klucza = {k._seen_store.key: k._seen_store.zapisane}
+    klient.terminarz = [
+        {"data": f"2026-11-{d:02d}", "tytul": f"Wydarzenie {d}", "przedmiot": "X", "godzina": "",
+         "numer_lekcji": "", "szczegoly": "", "tydzien": "", "href": f"h{d}"}
+        for d in range(1, 26)
+    ]
+    k2 = _nowy_koordynator(klient)
+    odswiez(k2)
+    daty = [z["data"] for z in _zdarzenia(k2.hass, sensor.EVENT_NOWE_ZDARZENIE)]
+    assert len(daty) == sensor.SEEN_LIMIT_LAWINY
+    assert "2026-11-25" in daty and "2026-11-01" not in daty
+    odswiez(k2)  # pominiete nie wracaja
+    assert len(_zdarzenia(k2.hass, sensor.EVENT_NOWE_ZDARZENIE)) == sensor.SEEN_LIMIT_LAWINY

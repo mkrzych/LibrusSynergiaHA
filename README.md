@@ -44,7 +44,7 @@ Wymagania: Home Assistant **2024.8.0** lub nowszy.
 2. Wyszukaj **Librus APIX**.
 3. Podaj login i hasło do Librus Synergia.
 
-Dane odświeżają się **co 2 godziny**. Pierwsze uruchomienie tylko zapamiętuje stan, więc nie dostaniesz lawiny powiadomień o starych ocenach. Drugie dziecko dodajesz jako kolejny wpis integracji (jeden login = jeden wpis).
+Dane odświeżają się **co 2 godziny**. Pierwsze uruchomienie tylko zapamiętuje stan, więc nie dostaniesz lawiny powiadomień o starych ocenach. Zapamiętane elementy (oceny, wiadomości, zadania, terminarz, nieobecności) są zapisywane trwale, więc po restarcie Home Assistanta zdarzenia o rzeczach, które pojawiły się w Librusie w czasie przerwy, zostaną wysłane (maksymalnie 20 najnowszych danego rodzaju). Drugie dziecko dodajesz jako kolejny wpis integracji (jeden login = jeden wpis).
 
 ## 🧩 Encje
 

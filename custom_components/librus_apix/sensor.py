@@ -24,6 +24,7 @@ from homeassistant.util import slugify
 from .const import (
     DOMAIN,
     SCAN_INTERVAL,
+    SEEN_LIMIT_LAWINY,
     TIMETABLE_REFRESH,
     TYDZIEN_CACHE_TTL,
     TYDZIEN_OKNO_NAPRZOD,
@@ -165,11 +166,40 @@ SYMBOLE_NIEOBECNOSCI = {"nb", "u"}
 SYMBOL_USPRAWIEDLIWIONA = "u"
 
 
-def _klucz_nieobecnosci(wpis: Dict) -> Any:
+def _na_tekst(*czesci: Any) -> str:
+    """Zloz klucz z czesci jako tekst (klucze trafiaja do Store, wiec musza byc JSON-owalne)."""
+    return "|".join(str(c) for c in czesci)
+
+
+def _klucz_oceny(ocena: Dict) -> str:
+    """Klucz oceny: Librus nie podaje identyfikatora, wiec przedmiot + data + wartosc."""
+    return _na_tekst(ocena["subject"], ocena["date"], ocena["grade"])
+
+
+def _klucz_terminarza(zdarzenie: Dict) -> str:
+    """Klucz wpisu terminarza: href, a bez niego data + tytul + przedmiot."""
+    return zdarzenie.get("href") or _na_tekst(
+        zdarzenie["data"], zdarzenie["tytul"], zdarzenie["przedmiot"]
+    )
+
+
+def _klucz_nieobecnosci(wpis: Dict) -> str:
     """Klucz identyfikujacy nieobecnosc (niezalezny od statusu usprawiedliwienia)."""
-    return wpis.get("href") or (
+    return wpis.get("href") or _na_tekst(
         wpis.get("data"), wpis.get("numer_lekcji"), wpis.get("przedmiot")
     )
+
+
+def _ogranicz_lawine(nowe: List[Dict], pole_daty: str, zrodlo: str) -> List[Dict]:
+    """Po restarcie zostaw do ogloszenia najwyzej SEEN_LIMIT_LAWINY najnowszych wpisow."""
+    if len(nowe) <= SEEN_LIMIT_LAWINY:
+        return nowe
+    _LOGGER.warning(
+        "Po restarcie znaleziono %d nowych elementow (%s) - ogloszone zostanie %d najnowszych",
+        len(nowe), zrodlo, SEEN_LIMIT_LAWINY,
+    )
+    najnowsze = sorted(nowe, key=lambda e: e.get(pole_daty) or "", reverse=True)
+    return najnowsze[:SEEN_LIMIT_LAWINY]
 
 
 
@@ -184,6 +214,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             config_entry if isinstance(config_entry, str)
             else getattr(config_entry, "entry_id", "")
         )
+        # Klucze "widziane" (teksty) - trwale w Store, by dedup przetrwal restart HA
         self._seen_message_hrefs: set = set()
         self._seen_grade_ids: set = set()
         self._seen_homework_ids: set = set()
@@ -191,6 +222,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._seen_absence_ids: set = set()
         self._attendance_seeded: bool = False
         self._first_run: bool = True
+        self._seen_wczytane: bool = False
+        self._seen_po_wczytaniu: bool = False  # pierwszy cykl po wczytaniu stanu ze Store
+        self._seen_zapisane: Optional[Dict[str, Any]] = None
+        self._seen_store: Optional[Store] = (
+            Store(hass, 1, f"{DOMAIN}_{self.entry_id}_seen") if self.entry_id else None
+        )
         # Plan lekcji: pobierany rzadziej niz reszta danych
         self._plan: Optional[Dict[str, Any]] = None
         self._plan_pobrano: Optional[datetime] = None
@@ -224,6 +261,49 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         zapisane = await self._store.async_load()
         if isinstance(zapisane, dict):
             self._tresci = {str(k): str(v) for k, v in zapisane.items()}
+
+    def _seen_migawka(self) -> Dict[str, Any]:
+        return {
+            "wiadomosci": sorted(self._seen_message_hrefs),
+            "oceny": sorted(self._seen_grade_ids),
+            "zadania": sorted(self._seen_homework_ids),
+            "terminarz": sorted(self._seen_schedule_ids),
+            "nieobecnosci": sorted(self._seen_absence_ids),
+            "frekwencja_zaladowana": self._attendance_seeded,
+        }
+
+    async def _async_wczytaj_seen(self) -> None:
+        """Wczytaj klucze widzianych elementow; bez poprawnych danych zostaje cichy seed."""
+        if self._seen_wczytane:
+            return
+        self._seen_wczytane = True
+        if self._seen_store is None:
+            return
+        zapisane = await self._seen_store.async_load()
+        pola = ("wiadomosci", "oceny", "zadania", "terminarz", "nieobecnosci")
+        if not isinstance(zapisane, dict) or not all(
+            isinstance(zapisane.get(p), list) for p in pola
+        ):
+            return
+        self._seen_message_hrefs = {str(k) for k in zapisane["wiadomosci"]}
+        self._seen_grade_ids = {str(k) for k in zapisane["oceny"]}
+        self._seen_homework_ids = {str(k) for k in zapisane["zadania"]}
+        self._seen_schedule_ids = {str(k) for k in zapisane["terminarz"]}
+        self._seen_absence_ids = {str(k) for k in zapisane["nieobecnosci"]}
+        self._attendance_seeded = bool(zapisane.get("frekwencja_zaladowana"))
+        self._first_run = False
+        self._seen_po_wczytaniu = True
+        self._seen_zapisane = self._seen_migawka()
+
+    async def _async_zapisz_seen(self) -> None:
+        migawka = self._seen_migawka()
+        if self._seen_store is None or migawka == self._seen_zapisane:
+            return
+        try:
+            await self._seen_store.async_save(migawka)
+            self._seen_zapisane = migawka
+        except Exception as err:  # zapis nie moze psuc odswiezania danych
+            _LOGGER.warning("Nie udalo sie zapisac widzianych elementow: %s", err)
 
     async def _async_dolacz_tresci(self, zadania: List[Dict[str, Any]]) -> None:
         """Doczytaj tresc nowych zadan z najblizszych dni (limit zapytan na cykl)."""
@@ -272,6 +352,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
         try:
             await self._async_wczytaj_tresci()
+            await self._async_wczytaj_seen()
             student_info = await self.client.async_get_student_information()
             grades = await self.client.async_get_grades()
             messages = await self.client.async_get_messages(count=10)
@@ -353,21 +434,18 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 "semestr_biezacy": current_sem,
             }
 
-            # Pierwsze pobranie - tylko zapamietaj stan, nie wysylaj powiadomien
+            # Pierwsze pobranie bez zapisanego stanu - tylko zapamietaj, nie wysylaj powiadomien
             if self._first_run:
                 self._first_run = False
                 for msg in wiadomosci:
-                    self._seen_message_hrefs.add(msg["href"])
+                    if msg.get("href"):
+                        self._seen_message_hrefs.add(msg["href"])
                 for grade in oceny:
-                    self._seen_grade_ids.add(
-                        (grade["subject"], grade["date"], grade["grade"])
-                    )
+                    self._seen_grade_ids.add(_klucz_oceny(grade))
                 for zadanie in zadania_norm:
                     self._seen_homework_ids.add(zadanie["id"])
                 for zdarzenie in terminarz_przyszly:
-                    self._seen_schedule_ids.add(
-                        (zdarzenie["data"], zdarzenie["tytul"], zdarzenie["przedmiot"])
-                    )
+                    self._seen_schedule_ids.add(_klucz_terminarza(zdarzenie))
             else:
                 base = self._event_base(student_info)
                 self._fire_events(wiadomosci, oceny if oceny_ok else [], base)
@@ -383,6 +461,22 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         self._seen_absence_ids.add(_klucz_nieobecnosci(wpis))
                 else:
                     self._fire_absence_events(frekwencja["nieobecnosci"])
+
+            # Przycinanie: zbiory trzymaja tylko klucze nadal widoczne w zrodle (Store nie rosnie)
+            if wiadomosci:
+                self._seen_message_hrefs &= {m.get("href") for m in wiadomosci}
+            if oceny_ok:
+                self._seen_grade_ids &= {_klucz_oceny(g) for g in oceny}
+            if homework_raw is not None:
+                self._seen_homework_ids &= {z["id"] for z in zadania_norm}
+            if schedule_raw is not None:
+                self._seen_schedule_ids &= {_klucz_terminarza(e) for e in terminarz_przyszly}
+            if attendance_raw is not None:
+                self._seen_absence_ids &= {
+                    _klucz_nieobecnosci(w) for w in frekwencja["nieobecnosci"]
+                }
+            self._seen_po_wczytaniu = False
+            await self._async_zapisz_seen()
 
             return result
 
@@ -474,10 +568,15 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     },
                 )
 
+        nowe_oceny = [g for g in grades if _klucz_oceny(g) not in self._seen_grade_ids]
+        if self._seen_po_wczytaniu:
+            nowe_oceny = _ogranicz_lawine(nowe_oceny, "date", "oceny")
         for grade in grades:
-            grade_id = (grade["subject"], grade["date"], grade["grade"])
+            grade_id = _klucz_oceny(grade)
             if grade_id not in self._seen_grade_ids:
                 self._seen_grade_ids.add(grade_id)
+                if grade not in nowe_oceny:
+                    continue
                 _LOGGER.debug("Nowa ocena: %s %s", grade["subject"], grade["grade"])
                 self.hass.bus.fire(
                     EVENT_NOWA_OCENA,
@@ -495,10 +594,15 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self, terminarz: List[Dict], base: Optional[Dict[str, Any]] = None
     ) -> None:
         """Wyslij zdarzenia HA dla nowych zdarzen w kalendarzu."""
+        nowe = [z for z in terminarz if _klucz_terminarza(z) not in self._seen_schedule_ids]
+        if self._seen_po_wczytaniu:
+            nowe = _ogranicz_lawine(nowe, "data", "terminarz")
         for zdarzenie in terminarz:
-            ev_id = (zdarzenie["data"], zdarzenie["tytul"], zdarzenie["przedmiot"])
+            ev_id = _klucz_terminarza(zdarzenie)
             if ev_id not in self._seen_schedule_ids:
                 self._seen_schedule_ids.add(ev_id)
+                if zdarzenie not in nowe:
+                    continue
                 typ = klasyfikuj(
                     f"{zdarzenie['tytul']} {zdarzenie['przedmiot']} "
                     f"{parsuj_szczegoly(zdarzenie.get('szczegoly'))[1] or ''}"
@@ -543,10 +647,15 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _fire_absence_events(self, nieobecnosci: List[Dict]) -> None:
         """Wyslij zdarzenia HA dla nowych nieobecnosci."""
+        nowe = [w for w in nieobecnosci if _klucz_nieobecnosci(w) not in self._seen_absence_ids]
+        if self._seen_po_wczytaniu:
+            nowe = _ogranicz_lawine(nowe, "data", "nieobecnosci")
         for wpis in nieobecnosci:
             klucz = _klucz_nieobecnosci(wpis)
             if klucz not in self._seen_absence_ids:
                 self._seen_absence_ids.add(klucz)
+                if wpis not in nowe:
+                    continue
                 _LOGGER.debug("Nowa nieobecnosc: %s %s", wpis["data"], wpis["przedmiot"])
                 self.hass.bus.fire(
                     EVENT_NOWA_NIEOBECNOSC,
@@ -573,11 +682,17 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self, zadania: List[Dict], today: date, base: Optional[Dict[str, Any]] = None
     ) -> None:
         """Wyslij zdarzenia HA dla nowych zadan/sprawdzianow (dedup po id zadania)."""
+        nowe = [
+            z for z in zadania
+            if z["id"] not in self._seen_homework_ids and z["pilnosc"] != "po_terminie"
+        ]
+        if self._seen_po_wczytaniu:
+            nowe = _ogranicz_lawine(nowe, "termin", "zadania")
         for zadanie in zadania:
             if zadanie["id"] in self._seen_homework_ids:
                 continue
             self._seen_homework_ids.add(zadanie["id"])
-            if zadanie["pilnosc"] == "po_terminie":
+            if zadanie["pilnosc"] == "po_terminie" or zadanie not in nowe:
                 continue
             _LOGGER.debug("Nowe zadanie: %s %s", zadanie["przedmiot"], zadanie["kategoria"])
             termin = parse_iso(zadanie["termin"] or "")

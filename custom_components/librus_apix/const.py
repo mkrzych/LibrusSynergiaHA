@@ -43,6 +43,9 @@ ZADANIA_TRESC_HORYZONT_DNI = 7
 ZADANIA_TRESC_LIMIT_NA_CYKL = 5
 ZADANIA_TRESC_MAX_ZNAKOW = 300
 
+# Najwiecej zdarzen jednego rodzaju ogloszonych w pierwszym cyklu po restarcie HA
+SEEN_LIMIT_LAWINY = 20
+
 # Typy zdarzen terminarza. Kolejnosc ma znaczenie: pierwsza pasujaca regula wygrywa.
 # Slowa kluczowe sa porownywane po normalizacji (male litery, bez polskich znakow).
 REGULY_TYPOW = [
