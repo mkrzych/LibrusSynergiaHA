@@ -1044,11 +1044,10 @@ export class LibrusCard extends BazaHTMLElement {
     const wyd = chipyWydarzen(a.wydarzenia_dnia);
 
     if (a.dzien_wolny || !lekcje.length) {
-      return `${naglowek}${wyd}${komunikat(
-        a.dzien_wolny ? "Dzień wolny od zajęć" : "Brak lekcji",
-        "🎉",
-        "duzy",
-      )}`;
+      const tekst = a.dzien_wolny
+        ? `Dzień wolny od zajęć${a.powod_wolnego ? `<br><small>${esc(a.powod_wolnego)}</small>` : ""}`
+        : "Brak lekcji";
+      return `${naglowek}${wyd}${komunikat(tekst, "🎉", "duzy")}`;
     }
 
     let status = "";
@@ -1083,9 +1082,46 @@ export class LibrusCard extends BazaHTMLElement {
       const o = mapaOkienek.get(g.numer);
       if (o) kafle.push(`<div class="okienko-wiersz">${esc(opisOkienka(o))}</div>`);
     }
+    const podsumowanie = tryb === "jutro" ? this._podsumowanieJutra(ids) : "";
     return `${naglowek}${status ? `<div class="status">${status}</div>` : ""}${wyd}<div class="kafle">${kafle.join(
       "",
-    )}</div>`;
+    )}</div>${podsumowanie}`;
+  }
+
+  /* sprawdziany, zadania i plecak pod planem na jutro */
+  _podsumowanieJutra(ids) {
+    const st = this._stan(ids.do_zrobienia_jutro);
+    if (!st) return "";
+    const a = st.attributes || {};
+    const przedmioty = this._config.przedmioty;
+    const doSpakowania = Array.isArray(a.przedmioty_do_spakowania) ? a.przedmioty_do_spakowania : [];
+    const zadania = Array.isArray(a.zadania) ? a.zadania : [];
+    const sprawdziany = Array.isArray(a.sprawdziany) ? a.sprawdziany : [];
+    let html = "";
+    if (sprawdziany.length) {
+      html += `<div class="sekcja"><h3>📝 Sprawdziany i kartkówki</h3><ul class="lista-prosta">${sprawdziany
+        .map(
+          (x) =>
+            `<li>${esc(x.ikona || "📝")} ${esc(x.tytul)}${x.przedmiot ? ` <span class="drugorzedny">· ${esc(x.przedmiot)}</span>` : ""}</li>`,
+        )
+        .join("")}</ul></div>`;
+    }
+    if (zadania.length) {
+      html += `<div class="sekcja"><h3>🏠 Zadania na ten dzień</h3><ul class="zadania">${zadania
+        .map((z) => pozycjaZadania(z, przedmioty))
+        .join("")}</ul></div>`;
+    }
+    if (doSpakowania.length) {
+      html += `<div class="sekcja"><h3>🎒 Do spakowania</h3><div class="przedmioty-plecak">${doSpakowania
+        .map((p) => {
+          const s = stylPrzedmiotu(p, przedmioty);
+          return `<div class="przedmiot-kafel" style="${styleKoloru(s)}"><span class="emoji">${esc(
+            s.emoji,
+          )}</span><span>${esc(p)}</span></div>`;
+        })
+        .join("")}</div></div>`;
+    }
+    return html;
   }
 
   _kafel(l, akt) {

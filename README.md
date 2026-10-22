@@ -112,6 +112,14 @@ widok: tydzien
 slug: ola              # imię z identyfikatorów sensor.librus_ola_*
 ```
 
+Widok `jutro` to „kartka na jutro": plan lekcji, sprawdziany, zadania i przedmioty do spakowania. W piątek, sobotę i niedzielę pokazuje poniedziałek (także gdy jest wolny, wtedy z powodem, np. świętem).
+
+```yaml
+type: custom:librus-card
+widok: jutro
+slug: ola
+```
+
 Kilkoro dzieci w jednej karcie (przełącznik zapamiętuje wybór na urządzeniu):
 
 ```yaml

@@ -35,7 +35,7 @@ from .const import (
     ZADANIA_TRESC_LIMIT_NA_CYKL,
 )
 from .plan import (
-    najblizszy_dzien_nauki,
+    dzien_jutrzejszy,
     parse_iso,
     poniedzialek,
     przytnij_do_okna,
@@ -1245,9 +1245,8 @@ class _LibrusPlanSensor(CoordinatorEntity, SensorEntity):
         return ((self.coordinator.data or {}).get("plan") or {}).get("godziny", {})
 
     def _iso_jutro(self, dzis: date) -> str:
-        """Najblizszy dzien nauki po dzisiaj (w piatek poniedzialek); fallback: jutro."""
-        nastepny = najblizszy_dzien_nauki(self._plan_dni(), dzis)
-        return (nastepny or dzis + timedelta(days=1)).isoformat()
+        """Jutro; w piatek, sobote i niedziele najblizszy poniedzialek (takze gdy wolny)."""
+        return dzien_jutrzejszy(dzis).isoformat()
 
 
 class LibrusPlanDzisSensor(_LibrusPlanSensor):

@@ -182,9 +182,11 @@ def scal(
         dzien["liczba_zadan"] = sum(len(l["zadania"]) for l in dzien["lekcje"]) + sum(
             1 for w in dzien["wydarzenia_dnia"] if w["typ"] == "zadanie"
         )
-        dzien["dzien_wolny"] = any(w["typ"] == "dzien_wolny" for w in wydarzenia) or (
+        powody = [w.get("tytul") or "" for w in wydarzenia if w["typ"] == "dzien_wolny"]
+        dzien["dzien_wolny"] = bool(powody) or (
             data is not None and data.weekday() < 5 and not dzien["lekcje"]
         )
+        dzien["powod_wolnego"] = next((p for p in powody if p), "")
     return dni
 
 
@@ -196,6 +198,7 @@ def pusty_dzien(iso: str) -> Dict[str, Any]:
         "liczba_sprawdzianow": 0,
         "liczba_zadan": 0,
         "dzien_wolny": False,
+        "powod_wolnego": "",
     })
     return dzien
 

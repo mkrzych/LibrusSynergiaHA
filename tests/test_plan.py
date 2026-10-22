@@ -113,3 +113,10 @@ def test_przelom_roku():
     # sobota 2026-12-26 -> poniedzialek 2026-12-28; piatek 2027-01-01 po lekcjach -> 2027-01-04
     assert plan.wybierz_tydzien(datetime(2026, 12, 26, 9, 0), {}) == date(2026, 12, 28)
     assert plan.wybierz_tydzien(datetime(2027, 1, 1, 16, 0), {}) == date(2027, 1, 4)
+
+
+def test_dzien_jutrzejszy_pt_weekend_to_poniedzialek():
+    assert plan.dzien_jutrzejszy(date(2026, 10, 14)) == date(2026, 10, 15)  # sroda
+    assert plan.dzien_jutrzejszy(date(2026, 10, 15)) == date(2026, 10, 16)  # czwartek
+    for d in (16, 17, 18):  # pt, sob, nd
+        assert plan.dzien_jutrzejszy(date(2026, 10, d)) == date(2026, 10, 19)

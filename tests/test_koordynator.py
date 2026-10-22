@@ -262,10 +262,10 @@ def test_plan_dzis_i_jutro_w_srode(koordynator):
     e = _encje(koordynator)
     assert e["dzis"].native_value == "08:00–09:40"
     assert e["dzis"].extra_state_attributes["przedmioty"] == ["Biologia", "Matematyka"]
-    assert e["jutro"].native_value == "Wolne" or e["jutro"].extra_state_attributes["data"] == "2026-10-16"
-    # czwartek (15.10) nie ma lekcji -> najblizszy dzien nauki to piatek
-    assert e["jutro"].extra_state_attributes["data"] == "2026-10-16"
-    assert e["jutro"].extra_state_attributes["czy_jutro"] is False
+    # czwartek (15.10) nie ma lekcji, ale to nadal "jutro" - widok pokaze dzien wolny
+    a = e["jutro"].extra_state_attributes
+    assert a["data"] == "2026-10-15" and a["czy_jutro"] is True and a["dzien_wolny"] is True
+    assert e["jutro"].native_value == "Wolne"
 
 
 def test_plan_jutro_w_piatek_to_poniedzialek(koordynator, czas):
@@ -273,6 +273,12 @@ def test_plan_jutro_w_piatek_to_poniedzialek(koordynator, czas):
     e = _encje(koordynator)
     a = e["jutro"].extra_state_attributes
     assert a["data"] == "2026-10-19" and a["dzien"] == "poniedziałek" and a["czy_jutro"] is False
+
+
+@pytest.mark.parametrize("dzien,oczekiwane", [(16, "2026-10-19"), (17, "2026-10-19"), (18, "2026-10-19")])
+def test_plan_jutro_pt_sob_nd_to_poniedzialek(koordynator, czas, dzien, oczekiwane):
+    czas["now"] = datetime(2026, 10, dzien, 12, 0, tzinfo=timezone.utc)
+    assert _encje(koordynator)["jutro"].extra_state_attributes["data"] == oczekiwane
 
 
 def test_nastepna_lekcja_w_ciagu_dnia(koordynator, czas):

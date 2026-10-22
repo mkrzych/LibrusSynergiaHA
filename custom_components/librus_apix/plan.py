@@ -175,6 +175,13 @@ def najblizszy_dzien_nauki(plan: Dict[str, List[Dict[str, Any]]], dzis: date) ->
     return kandydaci[0] if kandydaci else None
 
 
+def dzien_jutrzejszy(dzis: date) -> date:
+    """Dzien pokazywany jako 'jutro': w piatek, sobote i niedziele najblizszy poniedzialek."""
+    if dzis.weekday() >= 4:
+        return dzis + timedelta(days=7 - dzis.weekday())
+    return dzis + timedelta(days=1)
+
+
 def _ostatni_koniec(lekcje: List[Dict[str, Any]]) -> time:
     konce = []
     for l in lekcje:
