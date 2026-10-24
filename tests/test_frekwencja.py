@@ -82,6 +82,7 @@ def _client(attendance):
     client.async_get_timetable = AsyncMock(return_value={"dni": {}, "godziny": {}, "braki": []})
     client.async_get_attendance = AsyncMock(side_effect=attendance)
     client.async_get_uwagi = AsyncMock(return_value=[])
+    client.async_get_ogloszenia = AsyncMock(return_value=[])
     return client
 
 
@@ -120,6 +121,8 @@ async def test_event_tylko_dla_nowej_nieobecnosci(hass, events):
         "usprawiedliwiona": False,
         "nauczyciel": "Jan Kowalski",
         "temat": "Ułamki",
+        "uczen": "",
+        "entry_id": coordinator.entry_id,
     }]
 
 

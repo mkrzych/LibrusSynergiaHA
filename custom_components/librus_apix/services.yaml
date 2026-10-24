@@ -19,3 +19,18 @@ pobierz_tydzien:
       example: "2026-10-19"
       selector:
         date:
+
+pobierz_ogloszenia:
+  name: Pobierz ogłoszenia
+  description: >-
+    Zwraca pełne archiwum ogłoszeń szkolnych zapisanych w Home Assistant
+    (od najnowszych), łącznie z poprzednimi wersjami treści i ogłoszeniami
+    usuniętymi już z Librusa. Używana przez kartę librus-card.
+  fields:
+    entry_id:
+      name: Wpis
+      description: Identyfikator wpisu konfiguracji (atrybut entry_id sensora ogłoszeń).
+      required: true
+      example: "01JABCDEF123"
+      selector:
+        text:

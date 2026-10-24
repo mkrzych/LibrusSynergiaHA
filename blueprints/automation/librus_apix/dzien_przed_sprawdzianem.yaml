@@ -1,0 +1,79 @@
+blueprint:
+  name: Librus – przypomnienie przed sprawdzianem
+  description: >-
+    Wysyła na telefon przypomnienie o sprawdzianach i kartkówkach, które są
+    za określoną liczbę dni (domyślnie jutro). Korzysta z sensora „Terminarz”,
+    który widzi sprawdziany z najbliższych 7 dni.
+  domain: automation
+  source_url: https://github.com/mkrzych/LibrusSynergiaHA/blob/main/blueprints/automation/librus_apix/dzien_przed_sprawdzianem.yaml
+  homeassistant:
+    min_version: 2024.8.0
+  input:
+    telefon:
+      name: Telefon
+      description: Urządzenie z aplikacją Home Assistant, na które trafi powiadomienie.
+      selector:
+        device:
+          integration: mobile_app
+    terminarz:
+      name: Sensor „Terminarz”
+      description: Np. sensor.terminarz. Przy kilku dzieciach utwórz osobną automatyzację dla każdego.
+      selector:
+        entity:
+          integration: librus_apix
+          domain: sensor
+    godzina:
+      name: Godzina powiadomienia
+      default: "18:00:00"
+      selector:
+        time:
+    dni_wczesniej:
+      name: Ile dni wcześniej
+      description: 0 = w dniu sprawdzianu, 1 = dzień wcześniej, maksymalnie 6.
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 6
+          step: 1
+          mode: box
+
+mode: single
+
+trigger:
+  - platform: time
+    at: !input godzina
+
+variables:
+  terminarz: !input terminarz
+  dni: !input dni_wczesniej
+  sprawdziany: >-
+    {{ (state_attr(terminarz, 'sprawdziany_7_dni') or [])
+       | selectattr('dni_do', 'equalto', dni | int) | list }}
+
+condition:
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: !input terminarz
+        state:
+          - unavailable
+          - unknown
+  - condition: template
+    value_template: "{{ sprawdziany | count > 0 }}"
+
+action:
+  - domain: mobile_app
+    type: notify
+    device_id: !input telefon
+    title: >-
+      📝 {{ 'Sprawdzian dziś' if dni | int == 0
+            else ('Jutro sprawdzian' if dni | int == 1
+            else 'Sprawdzian za ' ~ (dni | int) ~ ' dni') }}
+    message: |-
+      {% for s in sprawdziany -%}
+      {{ s.przedmiot }}{{ (': ' ~ s.tytul) if s.tytul and s.tytul != s.przedmiot else '' }} ({{ s.data }})
+      {% endfor -%}
+    data:
+      tag: librus_sprawdzian
+      group: librus

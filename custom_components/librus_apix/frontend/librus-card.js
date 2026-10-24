@@ -13,7 +13,7 @@
 export const CARD_VERSION = "1.4.0";
 
 const KLUCZ_UCZNIA = "librus-card:uczen";
-export const WIDOKI = ["dzis", "jutro", "tydzien", "zadania", "plecak"];
+export const WIDOKI = ["dzis", "jutro", "tydzien", "zadania", "plecak", "ogloszenia"];
 
 const DNI = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"];
 const SKROTY_DNI = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"];
@@ -226,6 +226,22 @@ export function fmtData(iso) {
   return m ? `${m[2]}.${m[1]}` : "";
 }
 
+/** "2026-10-22T10:05:00+02:00" -> "22.10.2026 10:05" (czas lokalny z napisu, bez przeliczania stref). */
+export function fmtMoment(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(String(iso ?? ""));
+  if (!m) return "";
+  return `${m[3]}.${m[2]}.${m[1]}${m[4] ? ` ${m[4]}:${m[5]}` : ""}`;
+}
+
+/** Odmiana liczebnika: odmiana(2, "wersja", "wersje", "wersji") -> "2 wersje". */
+export function odmiana(n, jeden, kilka, wiele) {
+  const k = Math.abs(Number(n)) || 0;
+  if (k === 1) return `${k} ${jeden}`;
+  const d = k % 10;
+  const s = k % 100;
+  return `${k} ${d >= 2 && d <= 4 && (s < 12 || s > 14) ? kilka : wiele}`;
+}
+
 /** Przesuwa tydzień o `delta` tygodni; wynik zawsze jest poniedziałkiem. */
 export function przesunTydzien(poniedzialekIso, delta) {
   const pon = poniedzialekTygodnia(poniedzialekIso);
@@ -369,6 +385,7 @@ export function entityIds(slug) {
     plan_tygodnia: `${p}plan_tygodnia`,
     do_zrobienia_jutro: `${p}do_zrobienia_jutro`,
     zadania_otwarte: `${p}zadania_otwarte`,
+    ogloszenia: `${p}ogloszenia`,
   };
 }
 
@@ -731,6 +748,22 @@ details.po-terminie > summary { cursor: pointer; font-weight: 600; color: var(--
   padding: 12px 6px; border-radius: 10px; background: var(--tlo); border: 1px solid var(--akcent); text-align: center; }
 .przedmiot-kafel .emoji { font-size: 28px; }
 .lista-prosta { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+
+/* Ogłoszenia */
+.ogloszenia { display: flex; flex-direction: column; gap: 6px; }
+.ogloszenie { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; }
+.ogloszenie.usuniete { border-left: 4px solid var(--error-color, #db4437); }
+.ogloszenie > summary { cursor: pointer; padding: 8px 10px; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.ogloszenie > summary::-webkit-details-marker { display: none; }
+.og-tytul { font-weight: 600; overflow-wrap: anywhere; }
+.og-meta { font-size: 12px; color: var(--secondary-text-color, #727272); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.og-tresc { padding: 0 10px 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.og-wersje { margin: 0 10px 10px; font-size: 13px; }
+.og-wersje > summary { cursor: pointer; color: var(--secondary-text-color, #727272); }
+.og-wersja { margin-top: 8px; padding: 6px 8px; border-left: 3px solid var(--divider-color, #e0e0e0); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pl-usuniete { border-color: var(--error-color, #db4437); color: var(--error-color, #db4437); }
+.pl-edytowane { border-color: var(--warning-color, #ffa600); }
+.og-stopka { margin-top: 10px; font-size: 12px; color: var(--secondary-text-color, #727272); }
 `;
 
 /* ------------------------------------------------------------------ */
@@ -762,6 +795,7 @@ export class LibrusCard extends BazaHTMLElement {
     this._wybranySlug = wczytajZapisanegoUcznia();
     this._podpis = [];
     this._otwarte = new Set();
+    this._resetOgloszen();
     this._resetTygodnia();
     if (this.attachShadow) {
       this.attachShadow({ mode: "open" });
@@ -795,6 +829,7 @@ export class LibrusCard extends BazaHTMLElement {
     }
     this._config = { ...config, widok };
     this._resetTygodnia();
+    this._resetOgloszen();
     this._podpis = [];
     this._render();
   }
@@ -847,6 +882,11 @@ export class LibrusCard extends BazaHTMLElement {
     this._wybor = null;
   }
 
+  _resetOgloszen() {
+    this._ogloszeniaNr = (this._ogloszeniaNr || 0) + 1;
+    this._ogloszenia = { dane: null, ladowanie: false, blad: null, podpis: null };
+  }
+
   _teraz() {
     return new Date();
   }
@@ -881,6 +921,7 @@ export class LibrusCard extends BazaHTMLElement {
         this._wybranySlug = slug;
         zapiszUcznia(slug);
         this._resetTygodnia();
+        this._resetOgloszen();
         this._otwarte.clear();
         this._podpis = this._podpisStanow();
         this._render();
@@ -959,6 +1000,30 @@ export class LibrusCard extends BazaHTMLElement {
     this._render();
   }
 
+  /** Pełne archiwum przychodzi z usługi; ponawiamy je, gdy sensor zgłosi nową synchronizację. */
+  async _wczytajOgloszenia(entryId, podpis) {
+    const nr = ++this._ogloszeniaNr;
+    this._ogloszenia = { ...this._ogloszenia, ladowanie: true, blad: null, podpis };
+    try {
+      const wynik = await this._hass.callWS({
+        type: "call_service",
+        domain: "librus_apix",
+        service: "pobierz_ogloszenia",
+        service_data: { entry_id: entryId },
+        return_response: true,
+      });
+      if (nr !== this._ogloszeniaNr) return;
+      const dane = wynik?.response ?? null;
+      if (!dane || !Array.isArray(dane.ogloszenia)) throw new Error("nieprawidłowa odpowiedź usługi");
+      this._ogloszenia.dane = dane;
+    } catch (err) {
+      if (nr !== this._ogloszeniaNr) return;
+      this._ogloszenia.blad = err?.message || String(err);
+    }
+    this._ogloszenia.ladowanie = false;
+    this._render();
+  }
+
   /* ---- render ---- */
 
   _render() {
@@ -986,6 +1051,7 @@ export class LibrusCard extends BazaHTMLElement {
     else if (widok === "tydzien") czesci.push(this._widokTygodnia(ids));
     else if (widok === "zadania") czesci.push(this._widokZadan(ids));
     else if (widok === "plecak") czesci.push(this._widokPlecaka(ids));
+    else if (widok === "ogloszenia") czesci.push(this._widokOgloszen(ids));
     return czesci.join("");
   }
 
@@ -1044,11 +1110,10 @@ export class LibrusCard extends BazaHTMLElement {
     const wyd = chipyWydarzen(a.wydarzenia_dnia);
 
     if (a.dzien_wolny || !lekcje.length) {
-      return `${naglowek}${wyd}${komunikat(
-        a.dzien_wolny ? "Dzień wolny od zajęć" : "Brak lekcji",
-        "🎉",
-        "duzy",
-      )}`;
+      const tekst = a.dzien_wolny
+        ? `Dzień wolny od zajęć${a.powod_wolnego ? `<br><small>${esc(a.powod_wolnego)}</small>` : ""}`
+        : "Brak lekcji";
+      return `${naglowek}${wyd}${komunikat(tekst, "🎉", "duzy")}`;
     }
 
     let status = "";
@@ -1083,9 +1148,46 @@ export class LibrusCard extends BazaHTMLElement {
       const o = mapaOkienek.get(g.numer);
       if (o) kafle.push(`<div class="okienko-wiersz">${esc(opisOkienka(o))}</div>`);
     }
+    const podsumowanie = tryb === "jutro" ? this._podsumowanieJutra(ids) : "";
     return `${naglowek}${status ? `<div class="status">${status}</div>` : ""}${wyd}<div class="kafle">${kafle.join(
       "",
-    )}</div>`;
+    )}</div>${podsumowanie}`;
+  }
+
+  /* sprawdziany, zadania i plecak pod planem na jutro */
+  _podsumowanieJutra(ids) {
+    const st = this._stan(ids.do_zrobienia_jutro);
+    if (!st) return "";
+    const a = st.attributes || {};
+    const przedmioty = this._config.przedmioty;
+    const doSpakowania = Array.isArray(a.przedmioty_do_spakowania) ? a.przedmioty_do_spakowania : [];
+    const zadania = Array.isArray(a.zadania) ? a.zadania : [];
+    const sprawdziany = Array.isArray(a.sprawdziany) ? a.sprawdziany : [];
+    let html = "";
+    if (sprawdziany.length) {
+      html += `<div class="sekcja"><h3>📝 Sprawdziany i kartkówki</h3><ul class="lista-prosta">${sprawdziany
+        .map(
+          (x) =>
+            `<li>${esc(x.ikona || "📝")} ${esc(x.tytul)}${x.przedmiot ? ` <span class="drugorzedny">· ${esc(x.przedmiot)}</span>` : ""}</li>`,
+        )
+        .join("")}</ul></div>`;
+    }
+    if (zadania.length) {
+      html += `<div class="sekcja"><h3>🏠 Zadania na ten dzień</h3><ul class="zadania">${zadania
+        .map((z) => pozycjaZadania(z, przedmioty))
+        .join("")}</ul></div>`;
+    }
+    if (doSpakowania.length) {
+      html += `<div class="sekcja"><h3>🎒 Do spakowania</h3><div class="przedmioty-plecak">${doSpakowania
+        .map((p) => {
+          const s = stylPrzedmiotu(p, przedmioty);
+          return `<div class="przedmiot-kafel" style="${styleKoloru(s)}"><span class="emoji">${esc(
+            s.emoji,
+          )}</span><span>${esc(p)}</span></div>`;
+        })
+        .join("")}</div></div>`;
+    }
+    return html;
   }
 
   _kafel(l, akt) {
@@ -1315,6 +1417,64 @@ export class LibrusCard extends BazaHTMLElement {
     return html;
   }
 
+  /* ---- widok: ogłoszenia ---- */
+
+  _widokOgloszen(ids) {
+    const st = this._stan(ids.ogloszenia);
+    if (!st) return brakEncji(ids.ogloszenia);
+    const a = st.attributes || {};
+    const podpis = `${a.entry_id}|${a.ostatnia_synchronizacja}|${st.state}`;
+    const og = this._ogloszenia;
+    if (a.entry_id && podpis !== og.podpis && !og.ladowanie && this._hass?.callWS) {
+      // poza bieżącym renderem – _wczytajOgloszenia sam wywoła _render
+      Promise.resolve().then(() => this._wczytajOgloszenia(a.entry_id, podpis));
+    }
+    const lista = og.dane?.ogloszenia || [];
+    const usuniete = lista.filter((o) => o.usuniete_z_librusa).length;
+    let html = `<div class="naglowek"><div class="tytul">📢 Ogłoszenia</div><div class="podtytul">${esc(
+      lista.length || st.state,
+    )} w archiwum${usuniete ? ` · usunięte z Librusa: ${esc(usuniete)}` : ""}</div></div>`;
+    if (a.archiwum_wstrzymane) {
+      html += komunikat("Nie udało się odczytać archiwum – nowe ogłoszenia nie są zapisywane (sprawdź log HA).", "⚠️");
+    }
+    if (og.blad) html += komunikat(`Nie udało się pobrać archiwum: ${esc(og.blad)}`, "⚠️");
+    if (!og.dane) return html + (og.blad ? "" : komunikat("Wczytywanie archiwum…", "⏳"));
+    if (!lista.length) return html + komunikat("Brak ogłoszeń", "📭", "duzy");
+    html += `<div class="ogloszenia">${lista.map((o) => this._pozycjaOgloszenia(o)).join("")}</div>`;
+    if (og.dane.ostatnia_synchronizacja) {
+      html += `<div class="og-stopka">Ostatnia synchronizacja z Librusem: ${esc(fmtMoment(og.dane.ostatnia_synchronizacja))}</div>`;
+    }
+    return html;
+  }
+
+  _pozycjaOgloszenia(o) {
+    const wersje = Array.isArray(o.wersje) ? o.wersje : [];
+    const plakietki = [];
+    if (o.usuniete_z_librusa) {
+      plakietki.push(`<span class="plakietka pl-usuniete">🗑️ usunięte z Librusa ${esc(fmtMoment(o.usuniete_z_librusa))}</span>`);
+    }
+    if (wersje.length > 1) plakietki.push(`<span class="plakietka pl-edytowane">✏️ edytowane (${esc(odmiana(wersje.length, "wersja", "wersje", "wersji"))})</span>`);
+    const poprzednie = wersje.slice(0, -1).reverse();
+    const historia = poprzednie.length
+      ? `<details class="og-wersje" data-klucz="ogw-${esc(o.id)}"><summary>Poprzednie wersje (${esc(poprzednie.length)})</summary>${poprzednie
+          .map(
+            (v) =>
+              `<div class="og-wersja"><div class="drugorzedny">widoczna ${esc(fmtMoment(v.pobrano_pierwszy))} – ${esc(
+                fmtMoment(v.pobrano_ostatni),
+              )}</div>${esc(v.tresc)}</div>`,
+          )
+          .join("")}</details>`
+      : "";
+    return `<details class="ogloszenie${o.usuniete_z_librusa ? " usuniete" : ""}" data-klucz="og-${esc(o.id)}">
+      <summary><span class="og-tytul">${esc(o.tytul || "(bez tytułu)")}</span>
+      <span class="og-meta"><span>${esc(o.data)}</span>${o.autor ? `<span>· ${esc(o.autor)}</span>` : ""}${plakietki.join("")}</span></summary>
+      <div class="og-tresc">${esc(o.tresc)}</div>${historia}
+      <div class="og-tresc drugorzedny">Zapisane w HA: ${esc(fmtMoment(o.pierwszy_raz))}${
+        o.ostatnio_widziane ? ` · ostatnio widziane w Librusie: ${esc(fmtMoment(o.ostatnio_widziane))}` : ""
+      }</div>
+    </details>`;
+  }
+
   /* ---- widok: plecak ---- */
 
   _widokPlecaka(ids) {
@@ -1368,7 +1528,7 @@ if (typeof customElements !== "undefined" && !customElements.get("librus-card"))
     globalThis.customCards.push({
       type: "librus-card",
       name: "Librus – plan i zadania",
-      description: "Plan lekcji (dziś, jutro, tydzień), zadania domowe i plecak na jutro z integracji Librus Synergia.",
+      description: "Plan lekcji (dziś, jutro, tydzień), zadania domowe, plecak na jutro i archiwum ogłoszeń z integracji Librus Synergia.",
       preview: false,
     });
   }

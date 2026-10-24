@@ -1,6 +1,7 @@
 """Platforma czujników dla integracji Librus APIX."""
 
 import asyncio
+import copy
 import logging
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -35,7 +36,7 @@ from .const import (
     ZADANIA_TRESC_LIMIT_NA_CYKL,
 )
 from .plan import (
-    najblizszy_dzien_nauki,
+    dzien_jutrzejszy,
     parse_iso,
     poniedzialek,
     przytnij_do_okna,
@@ -43,6 +44,8 @@ from .plan import (
 )
 from .scalanie import pusty_dzien, scal, zbuduj_tydzien
 from .terminarz import klasyfikuj, parsuj_szczegoly, podsumowanie, wzbogac_terminarz
+from .ogloszenia import dla_uslugi, posortowane, scal_archiwum
+from .ogloszenia import podsumowanie as podsumowanie_ogloszen
 from .uwagi import podsumowanie as podsumowanie_uwag
 from .zadania import (
     do_pobrania_tresci,
@@ -143,6 +146,7 @@ async def async_setup_entry(
         LibrusFrekwencjaSensor(coordinator, config_entry),
         LibrusNieobecnosciSensor(coordinator, config_entry),
         LibrusUwagiSensor(coordinator, config_entry),
+        LibrusOgloszeniaSensor(coordinator, config_entry, slug, imie),
         LibrusSprawdzianySensor(coordinator, config_entry),
     ]
 
@@ -163,6 +167,12 @@ EVENT_NOWE_ZADANIE = f"{DOMAIN}_nowe_zadanie"
 EVENT_NOWE_ZDARZENIE = f"{DOMAIN}_nowe_zdarzenie"
 EVENT_NOWA_NIEOBECNOSC = f"{DOMAIN}_nowa_nieobecnosc"
 EVENT_NOWA_UWAGA = f"{DOMAIN}_nowa_uwaga"
+EVENT_NOWE_OGLOSZENIE = f"{DOMAIN}_nowe_ogloszenie"
+EVENT_OGLOSZENIE_ZMIENIONE = f"{DOMAIN}_ogloszenie_zmienione"
+EVENT_OGLOSZENIE_USUNIETE = f"{DOMAIN}_ogloszenie_usuniete"
+
+# Ile najnowszych ogloszen trafia do atrybutow sensora (pelne archiwum: usluga pobierz_ogloszenia)
+OGLOSZENIA_W_ATRYBUTACH = 5
 
 # Symbole z dziennika: nb = nieobecnosc, u = nieobecnosc usprawiedliwiona
 SYMBOLE_NIEOBECNOSCI = {"nb", "u"}
@@ -243,6 +253,16 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._store: Optional[Store] = (
             Store(hass, 1, f"{DOMAIN}_{self.entry_id}_tresci") if self.entry_id else None
         )
+        # Archiwum ogloszen (id -> wpis): tylko rosnie, trwale w Store, nigdy nie jest czyszczone
+        self._ogloszenia: Dict[str, Dict[str, Any]] = {}
+        self._ogloszenia_zaladowane: bool = False  # byl juz udany pierwszy (cichy) import
+        self._ogloszenia_wczytane: bool = False
+        self._ogloszenia_blad_store: bool = False  # nieczytelny Store - nie nadpisujemy go
+        self._ogloszenia_zapisane: Optional[Dict[str, Any]] = None
+        self._ogloszenia_synchronizacja: Optional[str] = None
+        self._ogloszenia_store: Optional[Store] = (
+            Store(hass, 1, f"{DOMAIN}_{self.entry_id}_ogloszenia") if self.entry_id else None
+        )
         self._zadania_blad_od: Optional[datetime] = None
         self._zadania_aktualne: bool = True
         # Cache tygodni pobieranych uslugą pobierz_tydzien
@@ -266,6 +286,105 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         zapisane = await self._store.async_load()
         if isinstance(zapisane, dict):
             self._tresci = {str(k): str(v) for k, v in zapisane.items()}
+
+    async def _async_wczytaj_ogloszenia(self) -> None:
+        if self._ogloszenia_wczytane:
+            return
+        self._ogloszenia_wczytane = True
+        if self._ogloszenia_store is None:
+            return
+        try:
+            zapisane = await self._ogloszenia_store.async_load()
+        except Exception as err:  # noqa: BLE001
+            # Archiwum to dowod - przy nieczytelnym pliku wolimy nic nie zapisywac niz go nadpisac
+            self._ogloszenia_blad_store = True
+            _LOGGER.error(
+                "Nie udalo sie wczytac archiwum ogloszen - archiwizacja wstrzymana do restartu: %s", err
+            )
+            return
+        if isinstance(zapisane, dict) and isinstance(zapisane.get("ogloszenia"), dict):
+            self._ogloszenia = zapisane["ogloszenia"]
+            self._ogloszenia_zaladowane = bool(zapisane.get("zaladowane"))
+            self._ogloszenia_synchronizacja = zapisane.get("synchronizacja")
+            self._ogloszenia_zapisane = copy.deepcopy(zapisane)
+
+    async def _async_archiwizuj_ogloszenia(
+        self, pobrane: Optional[List[Dict[str, str]]], now: datetime, base: Dict[str, Any]
+    ) -> None:
+        """Dopisz pobrane ogloszenia do archiwum, wyslij zdarzenia i zapisz Store."""
+        if pobrane is None or self._ogloszenia_blad_store:
+            return
+        teraz = now.isoformat(timespec="seconds")
+        self._ogloszenia, zmiany = scal_archiwum(self._ogloszenia, pobrane, teraz)
+        self._ogloszenia_synchronizacja = teraz
+        if not self._ogloszenia_zaladowane:
+            # Pierwszy import: wszystko do archiwum, bez zalewu powiadomieniami
+            self._ogloszenia_zaladowane = True
+        else:
+            self._fire_announcement_events(zmiany, base)
+
+        migawka = {
+            "zaladowane": True,
+            "synchronizacja": teraz,
+            "ogloszenia": self._ogloszenia,
+        }
+        if self._ogloszenia_store is None or migawka == self._ogloszenia_zapisane:
+            return
+        try:
+            await self._ogloszenia_store.async_save(migawka)
+            self._ogloszenia_zapisane = copy.deepcopy(migawka)
+        except Exception as err:  # zapis nie moze psuc odswiezania danych
+            _LOGGER.warning("Nie udalo sie zapisac archiwum ogloszen: %s", err)
+
+    def _fire_announcement_events(self, zmiany: Dict[str, List[str]], base: Dict[str, Any]) -> None:
+        """Zdarzenia HA dla nowych, zmienionych i usunietych z Librusa ogloszen."""
+        for rodzaj, zdarzenie in (
+            ("nowe", EVENT_NOWE_OGLOSZENIE),
+            ("zmienione", EVENT_OGLOSZENIE_ZMIENIONE),
+            ("usuniete", EVENT_OGLOSZENIE_USUNIETE),
+        ):
+            for oid in zmiany[rodzaj]:
+                wpis = self._ogloszenia[oid]
+                dane = {
+                    "id": oid,
+                    "tytul": wpis["tytul"],
+                    "autor": wpis["autor"],
+                    "data": wpis["data"],
+                    "tresc": wpis["wersje"][-1]["tresc"],
+                    "wersja": len(wpis["wersje"]),
+                }
+                if rodzaj == "zmienione":
+                    dane["poprzednia_tresc"] = wpis["wersje"][-2]["tresc"]
+                _LOGGER.debug("Ogloszenie (%s): %s", rodzaj, wpis["tytul"])
+                self.hass.bus.fire(zdarzenie, {**dane, **base})
+
+    def _ogloszenia_stan(self) -> Dict[str, Any]:
+        """Lekkie podsumowanie archiwum do danych koordynatora (atrybuty sensora)."""
+        lista = posortowane(self._ogloszenia)
+        return {
+            "liczba": len(lista),
+            **podsumowanie_ogloszen(self._ogloszenia),
+            "ostatnia_synchronizacja": self._ogloszenia_synchronizacja,
+            "archiwum_wstrzymane": self._ogloszenia_blad_store,
+            "najnowsze": [
+                {
+                    "tytul": w["tytul"],
+                    "autor": w["autor"],
+                    "data": w["data"],
+                    "usuniete_z_librusa": w.get("usuniete_z_librusa"),
+                    "wersje": len(w["wersje"]),
+                }
+                for w in lista[:OGLOSZENIA_W_ATRYBUTACH]
+            ],
+        }
+
+    def pobierz_ogloszenia(self) -> Dict[str, Any]:
+        """Pelne archiwum ogloszen (usluga pobierz_ogloszenia), od najnowszych."""
+        return {
+            "ogloszenia": [dla_uslugi(w) for w in posortowane(self._ogloszenia)],
+            "ostatnia_synchronizacja": self._ogloszenia_synchronizacja,
+            "archiwum_wstrzymane": self._ogloszenia_blad_store,
+        }
 
     def _seen_migawka(self) -> Dict[str, Any]:
         return {
@@ -364,6 +483,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             await self._async_wczytaj_tresci()
             await self._async_wczytaj_seen()
+            await self._async_wczytaj_ogloszenia()
             student_info = await self.client.async_get_student_information()
             grades = await self.client.async_get_grades()
             messages = await self.client.async_get_messages(count=10)
@@ -371,6 +491,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             schedule_raw = await self.client.async_get_schedule()
             attendance_raw = await self.client.async_get_attendance()
             uwagi_raw = await self.client.async_get_uwagi()
+            ogloszenia_raw = await self.client.async_get_ogloszenia()
             frekwencja = self._build_frekwencja(attendance_raw)
             plan = await self._async_plan(now, today)
 
@@ -474,7 +595,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     for wpis in frekwencja["nieobecnosci"]:
                         self._seen_absence_ids.add(_klucz_nieobecnosci(wpis))
                 else:
-                    self._fire_absence_events(frekwencja["nieobecnosci"])
+                    self._fire_absence_events(
+                        frekwencja["nieobecnosci"], self._event_base(student_info)
+                    )
 
             # Uwagi maja wlasny seed (jak nieobecnosci): nieudane pierwsze pobranie nie moze
             # skutkowac ogloszeniem starych uwag jako nowych
@@ -484,6 +607,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     self._seen_uwagi_ids.update(u["id"] for u in uwagi_raw)
                 else:
                     self._fire_remark_events(uwagi_raw, self._event_base(student_info))
+
+            # Ogloszenia: archiwum bez przycinania (zniknięcie z Librusa = tylko znacznik)
+            await self._async_archiwizuj_ogloszenia(
+                ogloszenia_raw, now, self._event_base(student_info)
+            )
+            result["ogloszenia"] = self._ogloszenia_stan()
 
             # Przycinanie: zbiory trzymaja tylko klucze nadal widoczne w zrodle (Store nie rosnie)
             if wiadomosci:
@@ -670,7 +799,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             "nieobecnosci": nieobecnosci,
         }
 
-    def _fire_absence_events(self, nieobecnosci: List[Dict]) -> None:
+    def _fire_absence_events(
+        self, nieobecnosci: List[Dict], base: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Wyslij zdarzenia HA dla nowych nieobecnosci."""
         nowe = [w for w in nieobecnosci if _klucz_nieobecnosci(w) not in self._seen_absence_ids]
         if self._seen_po_wczytaniu:
@@ -692,6 +823,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "usprawiedliwiona": wpis["usprawiedliwiona"],
                         "nauczyciel": wpis["nauczyciel"],
                         "temat": wpis["temat"],
+                        **(base or {}),
                     },
                 )
 
@@ -1240,9 +1372,8 @@ class _LibrusPlanSensor(CoordinatorEntity, SensorEntity):
         return ((self.coordinator.data or {}).get("plan") or {}).get("godziny", {})
 
     def _iso_jutro(self, dzis: date) -> str:
-        """Najblizszy dzien nauki po dzisiaj (w piatek poniedzialek); fallback: jutro."""
-        nastepny = najblizszy_dzien_nauki(self._plan_dni(), dzis)
-        return (nastepny or dzis + timedelta(days=1)).isoformat()
+        """Jutro; w piatek, sobote i niedziele najblizszy poniedzialek (takze gdy wolny)."""
+        return dzien_jutrzejszy(dzis).isoformat()
 
 
 class LibrusPlanDzisSensor(_LibrusPlanSensor):
@@ -1503,6 +1634,48 @@ class LibrusNieobecnosciSensor(CoordinatorEntity, SensorEntity):
                 }
                 for w in lista[: self.MAX_LISTA]
             ],
+        }
+
+
+class LibrusOgloszeniaSensor(CoordinatorEntity, SensorEntity):
+    """Czujnik archiwum ogloszen szkolnych (pelna tresc: usluga pobierz_ogloszenia)."""
+
+    def __init__(
+        self,
+        coordinator: LibrusDataUpdateCoordinator,
+        config_entry: ConfigEntry,
+        slug: str,
+        imie: str,
+    ) -> None:
+        """Inicjalizacja; jawne entity_id jak w sensorach planu (karta szuka po slugu)."""
+        super().__init__(coordinator)
+        self._config_entry = config_entry
+        self._attr_has_entity_name = False
+        self._attr_name = f"Librus {imie} - Ogłoszenia"
+        self._attr_unique_id = f"{config_entry.entry_id}_ogloszenia"
+        self.entity_id = f"sensor.librus_{slug}_ogloszenia"
+        self._attr_icon = "mdi:bullhorn-outline"
+
+    @property
+    def device_info(self) -> Dict[str, Any]:
+        """Informacje o urzadzeniu."""
+        return _device_info(self.coordinator, self._config_entry)
+
+    def _stan(self) -> Dict[str, Any]:
+        return (self.coordinator.data or {}).get("ogloszenia") or {}
+
+    @property
+    def native_value(self) -> int:
+        """Liczba ogloszen w archiwum (takze usunietych z Librusa)."""
+        return self._stan().get("liczba", 0)
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        """Liczniki i kilka najnowszych ogloszen; tresci nie trafiaja do recordera."""
+        stan = self._stan()
+        return {
+            "entry_id": self._config_entry.entry_id,
+            **{k: v for k, v in stan.items() if k != "liczba"},
         }
 
 

@@ -40,6 +40,8 @@ class FakeClient:
         self.terminarz = fixture("terminarz_pulapki.json")
         self.uwagi = []
         self.uwagi_ok = True
+        self.ogloszenia = []
+        self.ogloszenia_ok = True
 
     async def async_get_student_information(self):
         return SimpleNamespace(name="Ola Kowalska", class_name="5A", number=7, tutor="X", school="Y", lucky_number=3)
@@ -68,6 +70,9 @@ class FakeClient:
 
     async def async_get_uwagi(self):
         return self.uwagi if self.uwagi_ok else None
+
+    async def async_get_ogloszenia(self):
+        return [dict(o) for o in self.ogloszenia] if self.ogloszenia_ok else None
 
     async def async_get_timetable(self, start=None, weeks=2):
         self.wywolania["timetable"].append((start, weeks))
@@ -262,10 +267,10 @@ def test_plan_dzis_i_jutro_w_srode(koordynator):
     e = _encje(koordynator)
     assert e["dzis"].native_value == "08:00–09:40"
     assert e["dzis"].extra_state_attributes["przedmioty"] == ["Biologia", "Matematyka"]
-    assert e["jutro"].native_value == "Wolne" or e["jutro"].extra_state_attributes["data"] == "2026-10-16"
-    # czwartek (15.10) nie ma lekcji -> najblizszy dzien nauki to piatek
-    assert e["jutro"].extra_state_attributes["data"] == "2026-10-16"
-    assert e["jutro"].extra_state_attributes["czy_jutro"] is False
+    # czwartek (15.10) nie ma lekcji, ale to nadal "jutro" - widok pokaze dzien wolny
+    a = e["jutro"].extra_state_attributes
+    assert a["data"] == "2026-10-15" and a["czy_jutro"] is True and a["dzien_wolny"] is True
+    assert e["jutro"].native_value == "Wolne"
 
 
 def test_plan_jutro_w_piatek_to_poniedzialek(koordynator, czas):
@@ -273,6 +278,12 @@ def test_plan_jutro_w_piatek_to_poniedzialek(koordynator, czas):
     e = _encje(koordynator)
     a = e["jutro"].extra_state_attributes
     assert a["data"] == "2026-10-19" and a["dzien"] == "poniedziałek" and a["czy_jutro"] is False
+
+
+@pytest.mark.parametrize("dzien,oczekiwane", [(16, "2026-10-19"), (17, "2026-10-19"), (18, "2026-10-19")])
+def test_plan_jutro_pt_sob_nd_to_poniedzialek(koordynator, czas, dzien, oczekiwane):
+    czas["now"] = datetime(2026, 10, dzien, 12, 0, tzinfo=timezone.utc)
+    assert _encje(koordynator)["jutro"].extra_state_attributes["data"] == oczekiwane
 
 
 def test_nastepna_lekcja_w_ciagu_dnia(koordynator, czas):
@@ -471,3 +482,83 @@ def test_uwagi_dedup_przetrwa_restart_a_stary_store_bez_uwag_jest_cichy(koordyna
     k3 = _nowy_koordynator(klient)
     odswiez(k3)
     assert _zdarzenia(k3.hass, sensor.EVENT_NOWA_UWAGA) == []
+
+
+def _ogloszenie(tytul="Zebranie", tresc="Zapraszamy o 17", data="2026-10-15"):
+    og = load("ogloszenia")
+    return {"id": og.oblicz_id(tytul, "Kowalska Anna", data), "tytul": tytul,
+            "autor": "Kowalska Anna", "data": data, "tresc": tresc}
+
+
+def test_ogloszenia_pierwszy_import_cichy_potem_zdarzenia_nowe_zmienione_usuniete(koordynator, czas):
+    k, klient, hass = koordynator
+    klient.ogloszenia = [_ogloszenie()]
+    odswiez(k)
+    assert [n for n in (sensor.EVENT_NOWE_OGLOSZENIE, sensor.EVENT_OGLOSZENIE_ZMIENIONE,
+                        sensor.EVENT_OGLOSZENIE_USUNIETE) if _zdarzenia(hass, n)] == []
+    assert k.data["ogloszenia"]["liczba"] == 1
+
+    klient.ogloszenia = [_ogloszenie("Dzien otwarty", "Sobota 10:00", "2026-10-16"),
+                         _ogloszenie(tresc="Zapraszamy o 18")]
+    odswiez(k)
+    nowe = _zdarzenia(hass, sensor.EVENT_NOWE_OGLOSZENIE)
+    assert [z["tytul"] for z in nowe] == ["Dzien otwarty"]
+    assert nowe[0]["tresc"] == "Sobota 10:00" and nowe[0]["entry_id"] == "e1" and nowe[0]["uczen"] == "Ola Kowalska"
+    zm = _zdarzenia(hass, sensor.EVENT_OGLOSZENIE_ZMIENIONE)
+    assert len(zm) == 1 and zm[0]["poprzednia_tresc"] == "Zapraszamy o 17" and zm[0]["wersja"] == 2
+
+    klient.ogloszenia = [_ogloszenie("Dzien otwarty", "Sobota 10:00", "2026-10-16")]
+    odswiez(k)
+    odswiez(k)
+    odswiez(k)  # kolejne braki nie dublują zdarzenia
+    us = _zdarzenia(hass, sensor.EVENT_OGLOSZENIE_USUNIETE)
+    assert [z["tytul"] for z in us] == ["Zebranie"] and us[0]["tresc"] == "Zapraszamy o 18"
+
+    archiwum = k.pobierz_ogloszenia()["ogloszenia"]
+    assert [w["tytul"] for w in archiwum] == ["Dzien otwarty", "Zebranie"]  # usuniete zostaje w archiwum
+    assert [v["tresc"] for v in archiwum[1]["wersje"]] == ["Zapraszamy o 17", "Zapraszamy o 18"]
+    assert archiwum[1]["usuniete_z_librusa"]
+    assert k.data["ogloszenia"]["usuniete_z_librusa"] == 1
+
+
+def test_ogloszenia_blad_pobrania_nie_oznacza_usuniecia(koordynator):
+    k, klient, hass = koordynator
+    klient.ogloszenia = [_ogloszenie()]
+    odswiez(k)
+    klient.ogloszenia_ok = False
+    for _ in range(4):
+        odswiez(k)
+    assert _zdarzenia(hass, sensor.EVENT_OGLOSZENIE_USUNIETE) == []
+    assert k.pobierz_ogloszenia()["ogloszenia"][0]["usuniete_z_librusa"] is None
+
+
+def test_ogloszenia_archiwum_przetrwa_restart_i_nie_jest_przycinane(koordynator):
+    import json
+    k, klient, _ = koordynator
+    klient.ogloszenia = [_ogloszenie()]
+    odswiez(k)
+    zapisane = json.loads(json.dumps(k._ogloszenia_store.zapisane))
+    assert zapisane["zaladowane"] is True and len(zapisane["ogloszenia"]) == 1
+
+    klient.ogloszenia = [_ogloszenie("Nowe", "Tresc", "2026-10-20")]
+    _ha_stub.Store.wczytane_wg_klucza = {k._ogloszenia_store.key: zapisane}
+    k2 = _nowy_koordynator(klient)
+    odswiez(k2)
+    assert [z["tytul"] for z in _zdarzenia(k2.hass, sensor.EVENT_NOWE_OGLOSZENIE)] == ["Nowe"]
+    assert {w["tytul"] for w in k2.pobierz_ogloszenia()["ogloszenia"]} == {"Zebranie", "Nowe"}
+    assert len(k2._ogloszenia_store.zapisane["ogloszenia"]) == 2
+
+
+def test_ogloszenia_nieczytelny_store_wstrzymuje_zapis(koordynator, monkeypatch):
+    k, klient, _ = koordynator
+
+    async def zepsuty(self):
+        raise ValueError("uszkodzony JSON")
+
+    monkeypatch.setattr(_ha_stub.Store, "async_load", zepsuty, raising=True)
+    klient.ogloszenia = [_ogloszenie()]
+    try:
+        odswiez(k)
+    except Exception:
+        pass  # inne Store tez sa zepsute; liczy sie archiwum ogloszen
+    assert k._ogloszenia_store.zapisane is None

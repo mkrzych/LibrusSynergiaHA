@@ -32,6 +32,16 @@
           "description": "Dowolna data z żądanego tygodnia; domyślnie bieżący tydzień."
         }
       }
+    },
+    "pobierz_ogloszenia": {
+      "name": "Pobierz ogłoszenia",
+      "description": "Zwraca pełne archiwum ogłoszeń szkolnych zapisanych w Home Assistant, z poprzednimi wersjami treści i ogłoszeniami usuniętymi z Librusa (używane przez kartę librus-card).",
+      "fields": {
+        "entry_id": {
+          "name": "Wpis",
+          "description": "Identyfikator wpisu konfiguracji (atrybut entry_id sensora ogłoszeń)."
+        }
+      }
     }
   }
 }

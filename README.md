@@ -14,8 +14,10 @@ Integracja Home Assistant z dziennikiem **Librus Synergia**: oceny, średnie, fr
 | 🗓️ **Terminarz** | zdarzenia sklasyfikowane według typu (sprawdzian, kartkówka, wycieczka, dzień wolny...) |
 | 🏠 **Zadania domowe** | lista z pilnością oraz sensor „do zrobienia na jutro" i „co spakować do plecaka" |
 | 💬 **Uwagi nauczycieli** | pochwały i uwagi z dziennika (data, nauczyciel, treść, kategoria), liczniki i lista ostatnich wpisów |
+| 📢 **Archiwum ogłoszeń** | ogłoszenia szkolne z pełną treścią zapisywane w Home Assistant na stałe: wszystkie wersje po edycji i znacznik, gdy szkoła usunie ogłoszenie z Librusa |
 | 📬 **Wiadomości** | nadawca, temat, data i załączniki (treść nie jest pobierana, więc wiadomość nie zostaje oznaczona jako przeczytana) |
-| 🔔 **Zdarzenia** | nowa ocena, wiadomość, nieobecność, uwaga lub pochwała, zadanie i wpis w terminarzu, gotowe do automatyzacji |
+| 🔔 **Zdarzenia** | nowa ocena, wiadomość, nieobecność, uwaga lub pochwała, zadanie, wpis w terminarzu oraz nowe, zmienione i usunięte ogłoszenie, gotowe do automatyzacji |
+| 📲 **Blueprinty** | gotowe powiadomienia na telefon importowane jednym kliknięciem: nowości w dzienniku, wieczorny plecak, przypomnienie przed sprawdzianem, zmiany w planie |
 | 🧒 **Dwie karty** | `librus-card` (dashboard dziecka) i `librus-terminarz-card` instalują się razem z integracją |
 | 👧👦 **Wielu uczniów** | każde dziecko to osobny wpis integracji, a zdarzenia niosą imię ucznia i `entry_id` |
 
@@ -81,12 +83,26 @@ Te sensory mają stałe nazwy `sensor.librus_<imię>_...`, gdzie `<imię>` to im
 | `..._plan_tygodnia` | zakres dat („12.10–18.10") | `dni`, `numery_lekcji`, `godziny`, `entry_id` |
 | `..._do_zrobienia_jutro` | liczba zadań i sprawdzianów | `zadania`, `sprawdziany`, `przedmioty_do_spakowania`, `data` |
 | `..._zadania_otwarte` | liczba zadań od dziś | `zadania` (z `pilnosc`, `tresc`), `liczba_dzis`, `liczba_jutro`, `po_terminie` |
+| `..._ogloszenia` | liczba ogłoszeń w archiwum | `aktywne`, `usuniete_z_librusa`, `edytowane`, `najnowsze` (5 tytułów), `ostatnia_synchronizacja`, `entry_id` |
 
 `plan_tygodnia` pokazuje najbliższy tydzień nauki, a od piątku po ostatniej lekcji (i w weekend) tydzień **następny**. Lekcje mają znaczniki: 📝 sprawdzian, 🏠 zadanie, ⚠ zastępstwo, ❌ odwołanie. Wycieczki, rady pedagogiczne i dni wolne trafiają do `wydarzenia_dnia`.
 
 ### Usługa `librus_apix.pobierz_tydzien`
 
 Zwraca plan wybranego tygodnia scalony z terminarzem i zadaniami (`entry_id` znajdziesz w atrybutach `plan_tygodnia`). Bieżący i następny tydzień pochodzą z danych integracji, pozostałe są pobierane z Librusa i trzymane w pamięci przez godzinę. Z usługi korzysta karta przy przełączaniu tygodni.
+
+### Archiwum ogłoszeń szkolnych
+
+Szkoła może zmienić albo usunąć ogłoszenie w Librusie. Integracja zapisuje każde pobrane ogłoszenie w Home Assistant (plik `.storage/librus_apix_<entry_id>_ogloszenia`) i niczego z tego archiwum nie kasuje:
+
+- **edycja treści** dopisuje nową wersję, a poprzednie zostają z datami, kiedy były widoczne w Librusie;
+- **usunięcie z Librusa** nie usuwa wpisu, tylko dodaje znacznik `usuniete_z_librusa` z datą. Żeby chwilowy błąd Librusa nie dał fałszywego alarmu, ogłoszenie musi zniknąć w dwóch kolejnych udanych pobraniach. Nieudane pobranie niczego nie oznacza;
+- archiwum przetrwa restart, aktualizację i usunięcie integracji. Plik trafia do zwykłej kopii zapasowej Home Assistanta, więc przy ważnych sprawach warto ją mieć;
+- przy pierwszym uruchomieniu wszystkie obecne ogłoszenia trafiają do archiwum bez powiadomień.
+
+Archiwum zawiera to, co integracja zdążyła pobrać (co 2 godziny). Ogłoszenie dodane i usunięte między odświeżeniami nie zostanie złapane.
+
+Pełne archiwum (treść i wszystkie wersje) zwraca usługa `librus_apix.pobierz_ogloszenia` z parametrem `entry_id` (z atrybutów sensora `..._ogloszenia`). Korzysta z niej widok `ogloszenia` karty. Sensor trzyma w atrybutach tylko liczniki i kilka tytułów, żeby długie treści nie puchły w bazie historii.
 
 ## 🧒 Karty Lovelace
 
@@ -103,12 +119,28 @@ lovelace:
 
 ### `librus-card`: dashboard dziecka
 
-Pięć widoków (`widok:`): `dzis`, `jutro`, `tydzien`, `zadania` (kolory pilności) i `plecak` (co spakować plus zadania i sprawdziany na jutro). Widok tygodnia ma strzałki ◀ Teraz ▶ (2 tygodnie wstecz, 4 w przód).
+Sześć widoków (`widok:`): `dzis`, `jutro`, `tydzien`, `zadania` (kolory pilności), `plecak` (co spakować plus zadania i sprawdziany na jutro) i `ogloszenia` (archiwum ogłoszeń z pełną treścią, poprzednimi wersjami i oznaczeniem usuniętych z Librusa). Widok tygodnia ma strzałki ◀ Teraz ▶ (2 tygodnie wstecz, 4 w przód).
 
 ```yaml
 type: custom:librus-card
 widok: tydzien
 slug: ola              # imię z identyfikatorów sensor.librus_ola_*
+```
+
+Widok `jutro` to „kartka na jutro": plan lekcji, sprawdziany, zadania i przedmioty do spakowania. W piątek, sobotę i niedzielę pokazuje poniedziałek (także gdy jest wolny, wtedy z powodem, np. świętem).
+
+```yaml
+type: custom:librus-card
+widok: jutro
+slug: ola
+```
+
+Archiwum ogłoszeń (rozwiń ogłoszenie, by zobaczyć treść i poprzednie wersje):
+
+```yaml
+type: custom:librus-card
+widok: ogloszenia
+slug: ola
 ```
 
 Kilkoro dzieci w jednej karcie (przełącznik zapamiętuje wybór na urządzeniu):
@@ -209,16 +241,38 @@ content: >
 
 ## 🔔 Powiadomienia i automatyzacje
 
+### Gotowe blueprinty (najprościej)
+
+Blueprint to gotowa automatyzacja, w której wybierasz tylko telefon i kilka opcji, bez pisania YAML-a. Kliknij **Importuj blueprint**, potwierdź w Home Assistancie, a potem **Ustawienia → Automatyzacje i sceny → Dodaj automatyzację** i wybierz Librus z listy blueprintów.
+
+| Blueprint | Co robi | Import |
+|-----------|---------|--------|
+| **Nowości w dzienniku** | ocena, wiadomość, nieobecność, uwaga lub pochwała, zadanie, wpis w terminarzu, ogłoszenie (nowe, zmienione, usunięte); filtr po dziecku, wybór rodzajów, opcjonalnie tylko niskie oceny | [![Importuj blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmkrzych%2FLibrusSynergiaHA%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Flibrus_apix%2Fpowiadomienia_zdarzenia.yaml) |
+| **Wieczorny plecak** | o ustalonej godzinie: przedmioty do spakowania, zadania i sprawdziany na następny dzień nauki (w dni wolne cisza) | [![Importuj blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmkrzych%2FLibrusSynergiaHA%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Flibrus_apix%2Fwieczorny_plecak.yaml) |
+| **Przed sprawdzianem** | przypomnienie o sprawdzianach i kartkówkach za wybraną liczbę dni (domyślnie jutro) | [![Importuj blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmkrzych%2FLibrusSynergiaHA%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Flibrus_apix%2Fdzien_przed_sprawdzianem.yaml) |
+| **Zmiany w planie** | rano: lekcje odwołane i zastępstwa na dziś | [![Importuj blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmkrzych%2FLibrusSynergiaHA%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Flibrus_apix%2Fzmiany_w_planie.yaml) |
+
+- Telefon wybierasz z listy urządzeń z aplikacją Home Assistant, nie trzeba znać nazwy usługi `notify.mobile_app_...`.
+- Blueprint „Nowości w dzienniku" reaguje na zdarzenia z tabeli poniżej. W polu **Tylko to dziecko** wpisz imię i nazwisko jak w sensorze „Informacje o uczniu" albo zostaw puste. Pole **Oceny tylko do progu** pozwala dostawać tylko niskie oceny: przy progu 3 przyjdą 1, 2+ i 3, ale nie 3+ (plus liczy się jako +0,5, minus jako −0,25), a oceny nieliczbowe, np. „np", są pomijane.
+- Pozostałe trzy działają o wybranej godzinie i czytają sensory planu i terminarza, które wskazujesz w formularzu. Mają jedno dziecko na automatyzację, więc przy dwójce dzieci utwórz po jednej dla każdego.
+- Dane odświeżają się co 2 godziny, więc zmiana w planie wpisana w Librusie po godzinie z blueprintu „Zmiany w planie" dotrze dopiero przy następnym odświeżeniu.
+- Importowane są wersje z gałęzi `main`. Pliki znajdziesz w katalogu [`blueprints/automation/librus_apix`](blueprints/automation/librus_apix).
+
+### Własne automatyzacje na zdarzeniach
+
 Integracja wysyła zdarzenia Home Assistant przy każdym odświeżeniu danych. Możesz je przetestować bez czekania: **Narzędzia deweloperskie → Zdarzenia**, wpisz nazwę zdarzenia i dane, kliknij **Wyślij zdarzenie**.
 
 | Zdarzenie | Dane |
 |-----------|------|
 | `librus_apix_nowa_ocena` | `przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`, `uczen`, `entry_id` |
 | `librus_apix_nowa_wiadomosc` | `nadawca`, `temat`, `data`, `ma_zalacznik`, `uczen`, `entry_id` |
-| `librus_apix_nowa_nieobecnosc` | `data`, `przedmiot`, `numer_lekcji`, `typ`, `usprawiedliwiona`, `nauczyciel`, `temat` |
+| `librus_apix_nowa_nieobecnosc` | `data`, `przedmiot`, `numer_lekcji`, `typ`, `usprawiedliwiona`, `nauczyciel`, `temat`, `uczen`, `entry_id` |
 | `librus_apix_nowa_uwaga` | `tresc`, `data`, `nauczyciel`, `typ` (`pochwala` / `uwaga` / `informacja`), `rodzaj`, `kategoria`, `uczen`, `entry_id` |
 | `librus_apix_nowe_zadanie` | `przedmiot`, `kategoria`, `termin`, `nauczyciel`, `uczen`, `entry_id`, a także `id`, `termin_iso`, `dni_do`, `pilnosc`, `tresc`, `dzien_tygodnia_terminu` |
 | `librus_apix_nowe_zdarzenie` | `data`, `tytul`, `przedmiot`, `godzina`, `typ`, `wazne`, `uczen`, `entry_id` |
+| `librus_apix_nowe_ogloszenie` | `id`, `tytul`, `autor`, `data`, `tresc`, `wersja`, `uczen`, `entry_id` |
+| `librus_apix_ogloszenie_zmienione` | jak wyżej oraz `poprzednia_tresc` |
+| `librus_apix_ogloszenie_usuniete` | jak `nowe_ogloszenie` (ostatnia znana treść) |
 
 Nieobecność oznacza wpisy `nb` i `u` w dzienniku. Spóźnienia i zwolnienia jej nie wywołują, a samo usprawiedliwienie wcześniejszej nieobecności nie jest nową nieobecnością.
 

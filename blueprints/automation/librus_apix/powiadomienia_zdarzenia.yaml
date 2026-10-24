@@ -1,0 +1,254 @@
+blueprint:
+  name: Librus – powiadomienia o nowościach w dzienniku
+  description: >-
+    Wysyła powiadomienie na telefon, gdy w Librusie pojawi się nowa ocena,
+    wiadomość, nieobecność, uwaga lub pochwała, zadanie domowe, wpis w
+    terminarzu albo ogłoszenie szkolne (także gdy szkoła je zmieni lub
+    usunie). Możesz ograniczyć powiadomienia do jednego dziecka, wyłączyć
+    wybrane rodzaje i dostawać tylko niskie oceny.
+  domain: automation
+  source_url: https://github.com/mkrzych/LibrusSynergiaHA/blob/main/blueprints/automation/librus_apix/powiadomienia_zdarzenia.yaml
+  homeassistant:
+    min_version: 2024.8.0
+  input:
+    telefon:
+      name: Telefon
+      description: Urządzenie z aplikacją Home Assistant, na które trafią powiadomienia.
+      selector:
+        device:
+          integration: mobile_app
+    dziecko:
+      name: Tylko to dziecko
+      description: >-
+        Imię i nazwisko dokładnie tak, jak w Librusie (sensor „Informacje o
+        uczniu”). Puste pole = powiadomienia dla wszystkich dzieci.
+      default: ""
+      selector:
+        text:
+    wlacz_oceny:
+      name: Nowe oceny
+      default: true
+      selector:
+        boolean:
+    prog_oceny:
+      name: Oceny tylko do progu
+      description: >-
+        0 = powiadamiaj o wszystkich ocenach. Wartość większa od zera: tylko
+        oceny o wartości nie większej niż próg (plus liczy się jako +0,5, minus
+        jako −0,25, więc przy progu 3 dostaniesz 1, 2+ i 3, ale nie 3+). Oceny
+        nieliczbowe, np. „np”, są wtedy pomijane.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 6
+          step: 0.5
+          mode: box
+    wlacz_wiadomosci:
+      name: Nowe wiadomości
+      default: true
+      selector:
+        boolean:
+    wlacz_nieobecnosci:
+      name: Nowe nieobecności
+      default: true
+      selector:
+        boolean:
+    wlacz_uwagi:
+      name: Uwagi i pochwały nauczycieli
+      default: true
+      selector:
+        boolean:
+    wlacz_zadania:
+      name: Nowe zadania domowe
+      default: true
+      selector:
+        boolean:
+    wlacz_terminarz:
+      name: Nowe wpisy w terminarzu
+      default: true
+      selector:
+        boolean:
+    tylko_wazne_terminarz:
+      name: Z terminarza tylko ważne
+      description: Tylko sprawdziany i kartkówki, bez zwykłych wpisów.
+      default: true
+      selector:
+        boolean:
+    wlacz_ogloszenia:
+      name: Nowe ogłoszenia szkolne
+      default: true
+      selector:
+        boolean:
+    wlacz_zmiany_ogloszen:
+      name: Zmienione i usunięte ogłoszenia
+      description: >-
+        Powiadomienie, gdy szkoła zmieni treść ogłoszenia albo usunie je z
+        Librusa. Treść zostaje w archiwum Home Assistanta (karta, widok
+        ogłoszenia).
+      default: true
+      selector:
+        boolean:
+
+mode: queued
+max: 20
+
+trigger:
+  - platform: event
+    event_type: librus_apix_nowa_ocena
+    id: ocena
+  - platform: event
+    event_type: librus_apix_nowa_wiadomosc
+    id: wiadomosc
+  - platform: event
+    event_type: librus_apix_nowa_nieobecnosc
+    id: nieobecnosc
+  - platform: event
+    event_type: librus_apix_nowa_uwaga
+    id: uwaga
+  - platform: event
+    event_type: librus_apix_nowe_zadanie
+    id: zadanie
+  - platform: event
+    event_type: librus_apix_nowe_zdarzenie
+    id: zdarzenie
+  - platform: event
+    event_type: librus_apix_nowe_ogloszenie
+    id: ogloszenie
+  - platform: event
+    event_type: librus_apix_ogloszenie_zmienione
+    id: ogloszenie_zmienione
+  - platform: event
+    event_type: librus_apix_ogloszenie_usuniete
+    id: ogloszenie_usuniete
+
+variables:
+  dziecko: !input dziecko
+  prog_oceny: !input prog_oceny
+  wlaczone:
+    ocena: !input wlacz_oceny
+    wiadomosc: !input wlacz_wiadomosci
+    nieobecnosc: !input wlacz_nieobecnosci
+    uwaga: !input wlacz_uwagi
+    zadanie: !input wlacz_zadania
+    zdarzenie: !input wlacz_terminarz
+    ogloszenie: !input wlacz_ogloszenia
+    ogloszenie_zmienione: !input wlacz_zmiany_ogloszen
+    ogloszenie_usuniete: !input wlacz_zmiany_ogloszen
+  tylko_wazne: !input tylko_wazne_terminarz
+  d: "{{ trigger.event.data }}"
+  kto: "{{ (d.uczen ~ ': ') if d.uczen else '' }}"
+
+condition:
+  - condition: template
+    value_template: >-
+      {% set ok = wlaczone[trigger.id]
+         and (dziecko | trim == '' or d.uczen == dziecko | trim) %}
+      {% if ok and trigger.id == 'ocena' and prog_oceny | float(0) > 0 %}
+        {% set s = d.ocena | string | trim %}
+        {% set cyfra = s[0:1] | float(-1) %}
+        {% set dodatek = s[1:] %}
+        {% set wartosc = cyfra + (0.5 if '+' in dodatek else (-0.25 if '-' in dodatek else 0)) %}
+        {% set ok = cyfra >= 0 and wartosc <= prog_oceny | float(0) %}
+      {% endif %}
+      {% if ok and trigger.id == 'zdarzenie' and tylko_wazne %}
+        {% set ok = d.wazne == true %}
+      {% endif %}
+      {{ ok }}
+
+action:
+  - choose:
+      - conditions: "{{ trigger.id == 'ocena' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input telefon
+            title: "🎓 {{ kto }}{{ d.ocena }}"
+            message: "{{ d.przedmiot }} ({{ d.kategoria }}), {{ d.nauczyciel }}"
+            data:
+              tag: librus_ocena
+              group: librus
+      - conditions: "{{ trigger.id == 'wiadomosc' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input telefon
+            title: "📬 {{ kto }}{{ d.nadawca }}"
+            message: "{{ d.temat }}{{ ' 📎' if d.ma_zalacznik else '' }}"
+            data:
+              tag: librus_wiadomosc
+              group: librus
+      - conditions: "{{ trigger.id == 'nieobecnosc' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input telefon
+            title: "🚫 {{ kto }}nieobecność"
+            message: >-
+              {{ d.data }}, lekcja {{ d.numer_lekcji }}: {{ d.przedmiot }}
+              ({{ 'usprawiedliwiona' if d.usprawiedliwiona else 'nieusprawiedliwiona' }})
+            data:
+              tag: librus_nieobecnosc
+              group: librus
+      - conditions: "{{ trigger.id == 'uwaga' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input telefon
+            title: "{{ '👏' if d.typ == 'pochwala' else '⚠️' }} {{ kto }}{{ 'pochwała' if d.typ == 'pochwala' else 'uwaga' }}"
+            message: "{{ d.nauczyciel }}: {{ d.tresc }}"
+            data:
+              tag: librus_uwaga
+              group: librus
+      - conditions: "{{ trigger.id == 'zadanie' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input telefon
+            title: "🏠 {{ kto }}{{ d.przedmiot }}"
+            message: >-
+              {{ d.kategoria }}, termin: {{ d.termin }}{{ (' – ' ~ d.tresc) if d.tresc else '' }}
+            data:
+              tag: librus_zadanie
+              group: librus
+      - conditions: "{{ trigger.id == 'zdarzenie' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input telefon
+            title: "📅 {{ kto }}{{ d.tytul }}"
+            message: >-
+              {{ d.data }}{{ (' ' ~ d.godzina) if d.godzina else '' }}{{ ', ' ~ d.przedmiot if d.przedmiot else '' }}
+            data:
+              tag: librus_terminarz
+              group: librus
+      - conditions: "{{ trigger.id == 'ogloszenie' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input telefon
+            title: "📢 {{ kto }}{{ d.tytul }}"
+            message: "{{ d.autor }}: {{ d.tresc | truncate(250) }}"
+            data:
+              tag: "librus_ogloszenie_{{ d.id }}"
+              group: librus
+      - conditions: "{{ trigger.id == 'ogloszenie_zmienione' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input telefon
+            title: "✏️ {{ kto }}zmienione ogłoszenie: {{ d.tytul }}"
+            message: "Nowa treść (wersja {{ d.wersja }}): {{ d.tresc | truncate(250) }}"
+            data:
+              tag: "librus_ogloszenie_{{ d.id }}"
+              group: librus
+      - conditions: "{{ trigger.id == 'ogloszenie_usuniete' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input telefon
+            title: "🗑️ {{ kto }}usunięte ogłoszenie: {{ d.tytul }}"
+            message: "Szkoła usunęła je z Librusa – treść zostaje w archiwum HA. {{ d.tresc | truncate(150) }}"
+            data:
+              tag: "librus_ogloszenie_{{ d.id }}"
+              group: librus
