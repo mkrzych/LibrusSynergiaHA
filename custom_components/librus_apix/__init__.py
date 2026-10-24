@@ -391,6 +391,48 @@ class LibrusApiClient:
                 if attempt == 1:
                     return None
 
+    @staticmethod
+    def _fetch_ogloszenia(client):
+        """Pobierz i sparsuj strone ogloszen (blokujace, do executora)."""
+        from .ogloszenia import BrakDostepu, NieznanyUklad, parsuj_ogloszenia
+
+        resp = client.get(client.BASE_URL + "/ogloszenia")
+        try:
+            return parsuj_ogloszenia(resp.text)
+        except BrakDostepu as ex:
+            raise TokenError("Malformed or expired token.") from ex
+        except NieznanyUklad as ex:
+            raise ParseError(str(ex)) from ex
+
+    async def async_get_ogloszenia(self):
+        """Get school announcements or None on failure."""
+        for attempt in range(2):
+            try:
+                if not self._client or not self._token:
+                    if not await self.async_authenticate():
+                        return None
+
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(None, self._fetch_ogloszenia, self._client)
+
+            except (TokenError, ParseError) as ex:
+                _LOGGER.warning(
+                    "Announcements unavailable (attempt %d/2): %s, re-authenticating...",
+                    attempt + 1, ex,
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    _LOGGER.error("Failed to get announcements after re-authentication.")
+                    return None
+            except Exception as ex:
+                _LOGGER.error(
+                    "Failed to get announcements (attempt %d/2): %s\n%s",
+                    attempt + 1, ex, traceback.format_exc(),
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    return None
+
     async def async_get_schedule(self, od: Optional[date] = None, do: Optional[date] = None):
         """Get calendar events from Librus.
 
@@ -556,27 +598,44 @@ POBIERZ_TYDZIEN_SCHEMA = vol.Schema(
 )
 
 
-async def _async_register_services(hass: HomeAssistant) -> None:
-    """Zarejestruj usluge pobierz_tydzien (raz dla calego HA)."""
-    if hass.services.has_service(DOMAIN, SERVICE_POBIERZ_TYDZIEN):
-        return
+SERVICE_POBIERZ_OGLOSZENIA = "pobierz_ogloszenia"
+POBIERZ_OGLOSZENIA_SCHEMA = vol.Schema({vol.Required("entry_id"): cv.string})
 
-    async def _handle_pobierz_tydzien(call: ServiceCall) -> ServiceResponse:
+
+async def _async_register_services(hass: HomeAssistant) -> None:
+    """Zarejestruj uslugi pobierz_tydzien i pobierz_ogloszenia (raz dla calego HA)."""
+
+    def _koordynator(call: ServiceCall):
         dane = hass.data.get(DOMAIN, {}).get(call.data["entry_id"])
         coordinator = dane.get("coordinator") if isinstance(dane, dict) else None
         if coordinator is None:
             raise ServiceValidationError(
                 f"Nieznany wpis Librus: {call.data['entry_id']}"
             )
-        return await coordinator.async_pobierz_tydzien(call.data.get("poniedzialek"))
+        return coordinator
 
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_POBIERZ_TYDZIEN,
-        _handle_pobierz_tydzien,
-        schema=POBIERZ_TYDZIEN_SCHEMA,
-        supports_response=SupportsResponse.ONLY,
-    )
+    async def _handle_pobierz_tydzien(call: ServiceCall) -> ServiceResponse:
+        return await _koordynator(call).async_pobierz_tydzien(call.data.get("poniedzialek"))
+
+    async def _handle_pobierz_ogloszenia(call: ServiceCall) -> ServiceResponse:
+        return _koordynator(call).pobierz_ogloszenia()
+
+    if not hass.services.has_service(DOMAIN, SERVICE_POBIERZ_TYDZIEN):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_POBIERZ_TYDZIEN,
+            _handle_pobierz_tydzien,
+            schema=POBIERZ_TYDZIEN_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_POBIERZ_OGLOSZENIA):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_POBIERZ_OGLOSZENIA,
+            _handle_pobierz_ogloszenia,
+            schema=POBIERZ_OGLOSZENIA_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
 
 
 async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:

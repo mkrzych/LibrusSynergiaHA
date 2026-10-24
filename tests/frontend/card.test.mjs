@@ -20,6 +20,8 @@ import {
   wOknie,
   wyprowadzSlug,
   czyInnaWersja,
+  fmtMoment,
+  odmiana,
   LibrusCard,
 } from "../../custom_components/librus_apix/frontend/librus-card.js";
 
@@ -334,6 +336,7 @@ describe("entityIds / wyprowadzSlug", () => {
       plan_tygodnia: "sensor.librus_ola_plan_tygodnia",
       do_zrobienia_jutro: "sensor.librus_ola_do_zrobienia_jutro",
       zadania_otwarte: "sensor.librus_ola_zadania_otwarte",
+      ogloszenia: "sensor.librus_ola_ogloszenia",
     });
   });
   test("getStubConfig/wyprowadzSlug szuka plan_tygodnia", () => {
@@ -470,5 +473,103 @@ describe("render (bez DOM) – dane są escapowane we wszystkich widokach", () =
     const karta = new LibrusCard();
     assert.throws(() => karta.setConfig({ widok: "xyz", slug: "ola" }), /Nieznany widok/);
     assert.throws(() => karta.setConfig({ widok: "dzis" }), /slug/);
+  });
+});
+
+describe("ogłoszenia", () => {
+  const XSS = `<img src=x onerror=alert(1)>`;
+  const og = (extra = {}) => ({
+    id: "abc",
+    tytul: "Zebranie",
+    autor: "Kowalska Anna",
+    data: "2026-10-15",
+    tresc: "Linia 1\nLinia 2",
+    pierwszy_raz: "2026-10-15T08:00:00+02:00",
+    ostatnio_widziane: "2026-10-20T10:00:00+02:00",
+    usuniete_z_librusa: null,
+    wersje: [{ tresc: "Linia 1\nLinia 2", pobrano_pierwszy: "2026-10-15T08:00:00+02:00", pobrano_ostatni: "2026-10-20T10:00:00+02:00" }],
+    ...extra,
+  });
+  const karta = (hass, dane) => {
+    const k = new LibrusCard();
+    k._config = { widok: "ogloszenia", slug: "ola" };
+    k._hass = hass;
+    if (dane) k._ogloszenia = { dane, ladowanie: false, blad: null, podpis: "e1|t|1" };
+    return k;
+  };
+  const stany = (attrs = {}) => ({
+    states: { "sensor.librus_ola_ogloszenia": { state: "1", attributes: { entry_id: "e1", ostatnia_synchronizacja: "t", ...attrs } } },
+  });
+
+  test("fmtMoment i odmiana", () => {
+    assert.equal(fmtMoment("2026-10-22T10:05:00+02:00"), "22.10.2026 10:05");
+    assert.equal(fmtMoment("2026-10-22"), "22.10.2026");
+    assert.equal(fmtMoment(null), "");
+    assert.equal(odmiana(1, "wersja", "wersje", "wersji"), "1 wersja");
+    assert.equal(odmiana(3, "wersja", "wersje", "wersji"), "3 wersje");
+    assert.equal(odmiana(13, "wersja", "wersje", "wersji"), "13 wersji");
+    assert.equal(odmiana(24, "wersja", "wersje", "wersji"), "24 wersje");
+  });
+
+  test("brak encji -> komunikat", () => {
+    assert.match(karta({ states: {} })._html(), /Nie znaleziono encji/);
+  });
+
+  test("pobiera archiwum usługą i odświeża po nowej synchronizacji", async () => {
+    const wywolania = [];
+    const hass = {
+      ...stany(),
+      callWS: async (msg) => {
+        wywolania.push(msg);
+        return { response: { ogloszenia: [og()], ostatnia_synchronizacja: "2026-10-20T10:00:00+02:00" } };
+      },
+    };
+    const k = karta(hass);
+    k._render = () => {};
+    assert.match(k._html(), /Wczytywanie archiwum/);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(wywolania.length, 1);
+    assert.equal(wywolania[0].service, "pobierz_ogloszenia");
+    assert.deepEqual(wywolania[0].service_data, { entry_id: "e1" });
+    assert.match(k._html(), /Zebranie/);
+    k._html();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(wywolania.length, 1); // ten sam podpis – bez ponownego wołania
+    k._hass = { ...hass, ...stany({ ostatnia_synchronizacja: "t2" }) };
+    k._html();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(wywolania.length, 2);
+  });
+
+  test("usunięte i edytowane mają plakietki, poprzednie wersje są widoczne", () => {
+    const o = og({
+      usuniete_z_librusa: "2026-10-21T12:00:00+02:00",
+      tresc: "Nowa",
+      wersje: [
+        { tresc: "Stara treść", pobrano_pierwszy: "2026-10-15T08:00:00+02:00", pobrano_ostatni: "2026-10-16T08:00:00+02:00" },
+        { tresc: "Nowa", pobrano_pierwszy: "2026-10-17T08:00:00+02:00", pobrano_ostatni: "2026-10-19T08:00:00+02:00" },
+      ],
+    });
+    const html = karta(stany(), { ogloszenia: [o] })._html();
+    assert.match(html, /usunięte z Librusa 21\.10\.2026 12:00/);
+    assert.match(html, /edytowane \(2 wersje\)/);
+    assert.match(html, /Poprzednie wersje \(1\)/);
+    assert.match(html, /Stara treść/);
+  });
+
+  test("dane z archiwum są escapowane", () => {
+    const o = og({ id: XSS, tytul: XSS, autor: XSS, data: XSS, tresc: XSS, wersje: [{ tresc: XSS }, { tresc: XSS }] });
+    const html = karta(stany(), { ogloszenia: [o], ostatnia_synchronizacja: XSS })._html();
+    assert.ok(!html.includes("<img"));
+    assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
+  });
+
+  test("puste archiwum i błąd usługi", () => {
+    assert.match(karta(stany(), { ogloszenia: [] })._html(), /Brak ogłoszeń/);
+    const k = karta(stany());
+    k._ogloszenia = { dane: null, ladowanie: false, blad: XSS, podpis: "e1|t|1" };
+    const html = k._html();
+    assert.match(html, /Nie udało się pobrać archiwum/);
+    assert.ok(!html.includes("<img"));
   });
 });

@@ -175,3 +175,25 @@ def test_uwagi_brak_dostepu_wymusza_ponowne_logowanie(klient):
     klient.async_authenticate = auth
     assert asyncio.run(klient.async_get_uwagi()) is None
     assert stary.get.call_count == 1 and nowy.get.call_count == 1  # druga proba na swiezym kliencie
+
+
+def test_ogloszenia_parsuje_strone_z_klienta(klient):
+    from _builders import FIXTURES
+    klient._client.BASE_URL = "https://synergia.librus.pl"
+    klient._client.get.return_value = _odpowiedz((FIXTURES / "ogloszenia.html").read_text(encoding="utf-8"))
+    wynik = asyncio.run(klient.async_get_ogloszenia())
+    klient._client.get.assert_called_once_with("https://synergia.librus.pl/ogloszenia")
+    assert [w["tytul"] for w in wynik] == ["Zebranie z rodzicami klas 5", "Dzień otwarty"]
+
+
+def test_ogloszenia_nieznany_uklad_daje_none_po_ponownym_logowaniu(klient):
+    strona = _odpowiedz("<html><body><form>Zaloguj</form></body></html>")
+    klient._client.BASE_URL = "https://synergia.librus.pl"
+    klient._client.get.return_value = strona
+
+    async def auth():
+        return True
+
+    klient.async_authenticate = auth
+    klient._token = "t"
+    assert asyncio.run(klient.async_get_ogloszenia()) is None

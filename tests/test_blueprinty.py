@@ -186,10 +186,25 @@ PAYLOADY = {
         "data": "2026-10-06", "tytul": "Sprawdzian", "przedmiot": "Historia", "godzina": "08:00",
         "typ": "sprawdzian", "wazne": True, "uczen": "Ola Kowalska", "entry_id": "abc",
     },
+    "ogloszenie": {
+        "id": "a1b2", "tytul": "Zebranie z rodzicami", "autor": "Anna Nowak", "data": "2026-10-15",
+        "tresc": "Zapraszamy w czwartek o 17:00.", "wersja": 1, "uczen": "Ola Kowalska", "entry_id": "abc",
+    },
+    "ogloszenie_zmienione": {
+        "id": "a1b2", "tytul": "Zebranie z rodzicami", "autor": "Anna Nowak", "data": "2026-10-15",
+        "tresc": "Zapraszamy w czwartek o 18:00.", "wersja": 2, "poprzednia_tresc": "o 17:00",
+        "uczen": "Ola Kowalska", "entry_id": "abc",
+    },
+    "ogloszenie_usuniete": {
+        "id": "a1b2", "tytul": "Zebranie z rodzicami", "autor": "Anna Nowak", "data": "2026-10-15",
+        "tresc": "Zapraszamy w czwartek o 18:00.", "wersja": 2, "uczen": "Ola Kowalska", "entry_id": "abc",
+    },
 }
 WLACZNIKI = {
     "ocena": "wlacz_oceny", "wiadomosc": "wlacz_wiadomosci", "nieobecnosc": "wlacz_nieobecnosci",
     "uwaga": "wlacz_uwagi", "zadanie": "wlacz_zadania", "zdarzenie": "wlacz_terminarz",
+    "ogloszenie": "wlacz_ogloszenia", "ogloszenie_zmienione": "wlacz_zmiany_ogloszen",
+    "ogloszenie_usuniete": "wlacz_zmiany_ogloszen",
 }
 
 
@@ -412,3 +427,19 @@ def test_zmiany_w_planie_cisza_bez_zmian():
     stany = {PLAN_DZIS: {"lekcje": [_lekcja(1, "Matematyka"), _lekcja(2, "Polski")]}}
     assert uruchom(ZMIANY, "time", wejscia={"plan_dzis": PLAN_DZIS}, stany=stany) is None
     assert uruchom(ZMIANY, "time", wejscia={"plan_dzis": PLAN_DZIS}, stany={PLAN_DZIS: {}}) is None
+
+
+def test_ogloszenia_tresc_i_tag_per_ogloszenie():
+    nowe = uruchom(PLIK_ZDARZEN, "ogloszenie", PAYLOADY["ogloszenie"])
+    assert nowe["title"] == "📢 Ola Kowalska: Zebranie z rodzicami"
+    assert nowe["message"] == "Anna Nowak: Zapraszamy w czwartek o 17:00."
+    assert nowe["data"]["tag"] == "librus_ogloszenie_a1b2"
+    us = uruchom(PLIK_ZDARZEN, "ogloszenie_usuniete", PAYLOADY["ogloszenie_usuniete"])
+    assert "usunięte" in us["title"] and "archiwum HA" in us["message"]
+    zm = uruchom(PLIK_ZDARZEN, "ogloszenie_zmienione", PAYLOADY["ogloszenie_zmienione"])
+    assert "wersja 2" in zm["message"]
+
+
+def test_dluga_tresc_ogloszenia_jest_przycinana():
+    dlugie = {**PAYLOADY["ogloszenie"], "tresc": "słowo " * 200}
+    assert len(uruchom(PLIK_ZDARZEN, "ogloszenie", dlugie)["message"]) < 300
