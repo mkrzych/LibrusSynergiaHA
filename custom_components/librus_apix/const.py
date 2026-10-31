@@ -80,4 +80,4 @@ TYPY_CALODNIOWE = {"dzien_wolny", "wycieczka", "rada", "zebranie"}
 TYPY_SPRAWDZIAN = {"sprawdzian", "kartkowka"}
 
 # Wersja integracji (zgodna z manifest.json); karta JS porownuje ja ze swoja
-VERSION = "2.0.0"
+VERSION = "2.1.0"

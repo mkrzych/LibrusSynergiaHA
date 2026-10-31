@@ -304,7 +304,7 @@ def test_plan_tygodnia_domyslnie_najblizszy_tydzien_nauki(koordynator, czas):
     e = _encje(koordynator)
     a = e["tydzien"].extra_state_attributes
     assert e["tydzien"].native_value == "12.10–18.10"
-    assert a["entry_id"] == "e1" and a["tryb"] == "auto" and a["wersja_integracji"] == "2.0.0"
+    assert a["entry_id"] == "e1" and a["tryb"] == "auto" and a["wersja_integracji"] == "2.1.0"
     czas["now"] = datetime(2026, 10, 17, 9, 0, tzinfo=timezone.utc)  # sobota
     assert e["tydzien"].native_value == "19.10–25.10"
     assert e["tydzien"].extra_state_attributes["dni"][0]["lekcje"][0]["przedmiot"] == "Matematyka"
