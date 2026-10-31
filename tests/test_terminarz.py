@@ -145,3 +145,11 @@ def test_sensor_terminarza_zgodnosc_wsteczna_i_nowe_atrybuty():
     spr = sensor.LibrusSprawdzianySensor(coordinator, type("E", (), {"entry_id": "e1"})())
     assert spr.native_value == 3
     assert spr.extra_state_attributes["najblizszy"]["dni_do"] == 0
+
+
+def test_dodano_ze_szczegolow_wpisu():
+    ev = {"data": "2026-10-14", "tytul": "x", "przedmiot": "y", "href": "h",
+          "szczegoly": {"Opis": "o", "Data dodania": "2026-10-01 08:00:00"}}
+    assert terminarz.wzbogac_zdarzenie(ev, date(2026, 10, 13))["dodano"] == "2026-10-01 08:00:00"
+    assert terminarz.wzbogac_zdarzenie({**ev, "szczegoly": {}}, date(2026, 10, 13))["dodano"] is None
+    assert terminarz.parsuj_dodano("tekst") is None

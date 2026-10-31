@@ -59,6 +59,7 @@ def _czysty(v: Any) -> Optional[str]:
 
 def parsuj_szczegoly(szczegoly: Any) -> Tuple[Optional[str], Optional[str]]:
     """Wyciagnij (nauczyciel, opis) ze slownika albo napisu 'Nauczyciel: X<br />Opis: Y'."""
+
     pary: Dict[str, Any] = {}
     if isinstance(szczegoly, dict):
         pary = szczegoly
@@ -75,6 +76,16 @@ def parsuj_szczegoly(szczegoly: Any) -> Tuple[Optional[str], Optional[str]]:
         elif nk == "opis":
             opis = _czysty(v)
     return nauczyciel, opis
+
+
+def parsuj_dodano(szczegoly: Any) -> Optional[str]:
+    """Czas dodania wpisu ('Data dodania', np. '2026-10-30 09:36:08') ze szczegolow albo None."""
+    if not isinstance(szczegoly, dict):
+        return None
+    for k, v in szczegoly.items():
+        if normalizuj_tekst(k) == "data dodania":
+            return _czysty(v)
+    return None
 
 
 def parse_data(s: Any) -> Optional[date]:
@@ -105,6 +116,7 @@ def wzbogac_zdarzenie(ev: Dict[str, Any], dzis: date) -> Dict[str, Any]:
         "dni_do": (d - dzis).days if d else None,
         "nauczyciel": nauczyciel,
         "opis": opis,
+        "dodano": parsuj_dodano(ev.get("szczegoly")),
         "lekcja": parse_numer(ev.get("numer_lekcji")),
         "przedmiot_czysty": przedmiot,
         "id": ev.get("href") or f"{ev.get('data')}|{tytul}|{ev.get('przedmiot')}",

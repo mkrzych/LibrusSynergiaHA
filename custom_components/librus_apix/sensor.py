@@ -43,7 +43,7 @@ from .plan import (
     wybierz_tydzien,
 )
 from .scalanie import pusty_dzien, scal, zbuduj_tydzien
-from .terminarz import klasyfikuj, parsuj_szczegoly, podsumowanie, wzbogac_terminarz
+from .terminarz import klasyfikuj, parsuj_dodano, parsuj_szczegoly, podsumowanie, wzbogac_terminarz
 from .ogloszenia import dla_uslugi, posortowane, scal_archiwum
 from .ogloszenia import podsumowanie as podsumowanie_ogloszen
 from .uwagi import podsumowanie as podsumowanie_uwag
@@ -769,6 +769,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "tytul": zdarzenie["tytul"],
                         "przedmiot": zdarzenie["przedmiot"],
                         "godzina": zdarzenie["godzina"],
+                        "dodano": parsuj_dodano(zdarzenie.get("szczegoly")),
                         "typ": typ,
                         "wazne": typ in TYPY_SPRAWDZIAN,
                         **(base or {}),

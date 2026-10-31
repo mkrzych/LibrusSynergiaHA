@@ -197,3 +197,34 @@ def test_ogloszenia_nieznany_uklad_daje_none_po_ponownym_logowaniu(klient):
     klient.async_authenticate = auth
     klient._token = "t"
     assert asyncio.run(klient.async_get_ogloszenia()) is None
+
+
+def test_schedule_dolacza_szczegoly_przyszlych_wpisow_z_cache(klient):
+    def ev(href):
+        e = _ev("Sprawdzian")
+        e.href = href
+        return e
+
+    def fake(client, month, year):
+        return {9: [ev("a/old")], 14: [ev("a/b")], 15: [ev("")]} if month == "10" else {}
+
+    detail = MagicMock(return_value={"Opis": "Pelny opis ze strony wpisu", "Data dodania": "2026-10-01"})
+    with patch("librus_apix.schedule.get_schedule", side_effect=fake), patch(
+        "librus_apix.schedule.schedule_detail", detail
+    ):
+        wynik = asyncio.run(klient.async_get_schedule(od=date(2026, 10, 1)))
+        asyncio.run(klient.async_get_schedule(od=date(2026, 10, 1)))
+    # 9.10 jest przeszle, a wpis bez href nie ma podstrony; drugi cykl bierze z cache
+    assert detail.call_count == 1 and detail.call_args.args[1:] == ("a", "b")
+    przyszly = next(e for e in wynik if e["href"] == "a/b")
+    assert przyszly["szczegoly"]["Opis"] == "Pelny opis ze strony wpisu"
+
+
+def test_schedule_blad_szczegolow_nie_psuje_terminarza(klient):
+    e = _ev("Sprawdzian")
+    e.href = "a/b"
+    with patch("librus_apix.schedule.get_schedule", side_effect=lambda c, m, y: {14: [e]} if m == "10" else {}), patch(
+        "librus_apix.schedule.schedule_detail", side_effect=ParseError("zla strona")
+    ):
+        wynik = asyncio.run(klient.async_get_schedule())
+    assert [x["tytul"] for x in wynik] == ["Sprawdzian"]

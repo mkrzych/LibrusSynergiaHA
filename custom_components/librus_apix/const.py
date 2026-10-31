@@ -46,6 +46,10 @@ ZADANIA_TRESC_MAX_ZNAKOW = 300
 # Najwiecej zdarzen jednego rodzaju ogloszonych w pierwszym cyklu po restarcie HA
 SEEN_LIMIT_LAWINY = 20
 
+# Szczegoly wpisow terminarza (zakres materialu): cache i limit nowych zapytan na cykl
+SZCZEGOLY_TERMINARZA_TTL_S = 6 * 3600
+SZCZEGOLY_TERMINARZA_LIMIT = 40
+
 # Typy zdarzen terminarza. Kolejnosc ma znaczenie: pierwsza pasujaca regula wygrywa.
 # Slowa kluczowe sa porownywane po normalizacji (male litery, bez polskich znakow).
 REGULY_TYPOW = [

@@ -176,9 +176,11 @@ pokaz_nauczyciela: false
 max_zdarzen: 0                 # 0 = bez limitu
 ```
 
+Pełny opis wpisu karta bierze ze strony szczegółów wpisu w Librusie (jedno zapytanie na wpis, wynik trzymany 6 godzin, najwyżej 40 nowych zapytań na odświeżenie), więc po restarcie pełne opisy mogą pojawić się dopiero po kilku odświeżeniach. Wpisy bez własnej podstrony mają tylko krótki opis z listy.
+
 Jedna karta obsługuje jednego ucznia (jedną encję). Dla kilku dzieci dodaj osobne karty z różnym `entity`.
 
-Atrybuty `sensor.terminarz` (oprócz `zdarzenia`, `liczba_zdarzen`, `typy`): w każdym zdarzeniu `typ`, `ikona`, `wazne`, `dni_do`, `dzien_tygodnia`, `nauczyciel`, `opis`, a na poziomie sensora `typy_zdarzen`, `liczba_sprawdzianow_7_dni`, `najblizszy_sprawdzian`, `zakres_do`.
+Atrybuty `sensor.terminarz` (oprócz `zdarzenia`, `liczba_zdarzen`, `typy`): w każdym zdarzeniu `typ`, `ikona`, `wazne`, `dni_do`, `dzien_tygodnia`, `nauczyciel`, `opis`, `dodano` (czas dodania wpisu w Librusie, `RRRR-MM-DD GG:MM:SS`), a na poziomie sensora `typy_zdarzen`, `liczba_sprawdzianow_7_dni`, `najblizszy_sprawdzian`, `zakres_do`.
 
 ### Podgląd bez Home Assistanta
 
@@ -269,7 +271,7 @@ Integracja wysyła zdarzenia Home Assistant przy każdym odświeżeniu danych. M
 | `librus_apix_nowa_nieobecnosc` | `data`, `przedmiot`, `numer_lekcji`, `typ`, `usprawiedliwiona`, `nauczyciel`, `temat`, `uczen`, `entry_id` |
 | `librus_apix_nowa_uwaga` | `tresc`, `data`, `nauczyciel`, `typ` (`pochwala` / `uwaga` / `informacja`), `rodzaj`, `kategoria`, `uczen`, `entry_id` |
 | `librus_apix_nowe_zadanie` | `przedmiot`, `kategoria`, `termin`, `nauczyciel`, `uczen`, `entry_id`, a także `id`, `termin_iso`, `dni_do`, `pilnosc`, `tresc`, `dzien_tygodnia_terminu` |
-| `librus_apix_nowe_zdarzenie` | `data`, `tytul`, `przedmiot`, `godzina`, `typ`, `wazne`, `uczen`, `entry_id` |
+| `librus_apix_nowe_zdarzenie` | `data`, `tytul`, `przedmiot`, `godzina`, `dodano` (może być puste, gdy szczegóły wpisu nie zdążyły się pobrać), `typ`, `wazne`, `uczen`, `entry_id` |
 | `librus_apix_nowe_ogloszenie` | `id`, `tytul`, `autor`, `data`, `tresc`, `wersja`, `uczen`, `entry_id` |
 | `librus_apix_ogloszenie_zmienione` | jak wyżej oraz `poprzednia_tresc` |
 | `librus_apix_ogloszenie_usuniete` | jak `nowe_ogloszenie` (ostatnia znana treść) |

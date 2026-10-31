@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 import traceback
 from datetime import date, datetime, timedelta
 from typing import Dict, Any, Optional
@@ -26,6 +27,8 @@ from librus_apix.exceptions import ParseError, TokenError
 from .const import (
     DOMAIN,
     SCAN_INTERVAL,
+    SZCZEGOLY_TERMINARZA_LIMIT,
+    SZCZEGOLY_TERMINARZA_TTL_S,
     ZADANIA_NAPRZOD_DNI,
     ZADANIA_WSTECZ_DNI,
 )
@@ -70,6 +73,8 @@ class LibrusApiClient:
         self._client: Client = None
         self._token = None
         self._auth_lock = asyncio.Lock()
+        # Szczegoly wpisow terminarza (href -> (czas pobrania, slownik)); jedno zapytanie HTTP na wpis
+        self._szczegoly_terminarza: Dict[str, Any] = {}
 
     def _reset_auth(self) -> None:
         """Reset authentication state to force re-authentication on next call."""
@@ -433,6 +438,39 @@ class LibrusApiClient:
                 if attempt == 1:
                     return None
 
+    def _dolacz_szczegoly(self, events, schedule_detail, today: date) -> None:
+        """Dolacz do przyszlych wpisow pelne szczegoly (m.in. pelny opis) z podstrony wpisu.
+
+        Wynik jest w pamieci przez SZCZEGOLY_TERMINARZA_TTL_S; w jednym cyklu pobieramy
+        najwyzej SZCZEGOLY_TERMINARZA_LIMIT nowych wpisow, reszta w nastepnych. Blad
+        pojedynczego wpisu nie psuje terminarza - zostaja dane z listy.
+        """
+        teraz = time.monotonic()
+        pobrane = 0
+        dzis = today.isoformat()
+        for ev in events:
+            href = ev.get("href")
+            if not href or ev["data"] < dzis or "/" not in href:
+                continue
+            wpis = self._szczegoly_terminarza.get(href)
+            if wpis is None or teraz - wpis[0] > SZCZEGOLY_TERMINARZA_TTL_S:
+                if pobrane >= SZCZEGOLY_TERMINARZA_LIMIT:
+                    continue
+                pobrane += 1
+                prefix, suffix = href.split("/", 1)
+                try:
+                    szczegoly = schedule_detail(self._client, prefix, suffix)
+                except TokenError:
+                    raise
+                except Exception as ex:  # noqa: BLE001 - zla strona wpisu nie moze zablokowac terminarza
+                    _LOGGER.debug("Nie pobrano szczegolow wpisu %s: %s", href, ex)
+                    if wpis is None:
+                        continue
+                    szczegoly = wpis[1]
+                wpis = self._szczegoly_terminarza[href] = (teraz, szczegoly)
+            if wpis[1]:
+                ev["szczegoly"] = {**(ev["szczegoly"] if isinstance(ev["szczegoly"], dict) else {}), **wpis[1]}
+
     async def async_get_schedule(self, od: Optional[date] = None, do: Optional[date] = None):
         """Get calendar events from Librus.
 
@@ -457,7 +495,7 @@ class LibrusApiClient:
                     if not await self.async_authenticate():
                         return None
 
-                from librus_apix.schedule import get_schedule
+                from librus_apix.schedule import get_schedule, schedule_detail
                 from librus_apix.exceptions import ParseError
 
                 loop = asyncio.get_running_loop()
@@ -484,6 +522,7 @@ class LibrusApiClient:
                                     "szczegoly": ev.data,
                                     "href": ev.href,
                                 })
+                    self._dolacz_szczegoly(events, schedule_detail, today)
                     return sorted(events, key=lambda e: e["data"])
 
                 return await loop.run_in_executor(None, _fetch_months)
