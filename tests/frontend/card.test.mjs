@@ -401,7 +401,7 @@ describe("tygodnie", () => {
 
 describe("wersja", () => {
   test("CARD_VERSION i porównanie", () => {
-    assert.equal(CARD_VERSION, "1.4.0");
+    assert.equal(CARD_VERSION, "2.0.0");
     assert.equal(czyInnaWersja("1.4.0", "1.4.0"), false);
     assert.equal(czyInnaWersja("1.4.0", "1.4.1"), true);
     assert.equal(czyInnaWersja("1.4.0", undefined), false);
