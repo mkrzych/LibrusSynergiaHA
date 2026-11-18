@@ -82,6 +82,19 @@ class ServiceValidationError(HomeAssistantError):
     pass
 
 
+class ConfigEntryError(HomeAssistantError):
+    pass
+
+
+class ConfigEntryNotReady(HomeAssistantError):
+    pass
+
+
+class ConfigFlow:
+    def __init_subclass__(cls, **kwargs):
+        pass
+
+
 def _modul(nazwa, **atrybuty):
     m = _Auto(nazwa)
     for k, v in atrybuty.items():
@@ -112,7 +125,8 @@ def install() -> bool:
     _modul("homeassistant.components.sensor", SensorEntity=SensorEntity)
     _modul("homeassistant.components.http")
     _modul("homeassistant.components.frontend")
-    _modul("homeassistant.config_entries")
+    _modul("homeassistant.config_entries", ConfigFlow=ConfigFlow)
+    _modul("homeassistant.data_entry_flow")
     _modul("homeassistant.const", CONF_USERNAME="username", CONF_PASSWORD="password")
     _modul(
         "homeassistant.core",
@@ -123,6 +137,8 @@ def install() -> bool:
         "homeassistant.exceptions",
         HomeAssistantError=HomeAssistantError,
         ServiceValidationError=ServiceValidationError,
+        ConfigEntryError=ConfigEntryError,
+        ConfigEntryNotReady=ConfigEntryNotReady,
     )
     _modul("homeassistant.helpers")
     _modul("homeassistant.helpers.config_validation")

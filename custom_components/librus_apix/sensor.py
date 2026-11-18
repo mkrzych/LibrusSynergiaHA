@@ -121,12 +121,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Konfiguracja platformy czujnikow Librus APIX."""
-    dane = hass.data[DOMAIN][config_entry.entry_id]
-    client = dane["client"]
-
-    coordinator = LibrusDataUpdateCoordinator(hass, client, config_entry)
-    await coordinator.async_config_entry_first_refresh()
-    dane["coordinator"] = coordinator
+    # Koordynator tworzy i pierwszy raz odswieza async_setup_entry w __init__.py
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
 
     slug, imie = _slug_i_imie(hass, config_entry, coordinator)
 

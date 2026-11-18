@@ -11,7 +11,9 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to Librus. Please check your credentials.",
+      "cannot_connect": "Nie udało się połączyć z Librusem (sieć albo przerwa techniczna). Spróbuj ponownie za chwilę.",
+      "invalid_auth": "Librus odrzucił login lub hasło.",
+      "brak_dostepu": "Librus przyjął login i hasło, ale Synergia nie wpuszcza sesji („Brak dostępu”). Zaloguj się raz na synergia.librus.pl, zaakceptuj komunikaty (regulamin, zmiana hasła) i sprawdź, czy konto nie ma włączonego logowania dwuetapowego (2FA), którego integracja nie obsługuje.",
       "unknown": "Unexpected error occurred"
     },
     "abort": {

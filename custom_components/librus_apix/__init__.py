@@ -15,16 +15,23 @@ from homeassistant.core import (
     ServiceResponse,
     SupportsResponse,
 )
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import (
+    ConfigEntryError,
+    ConfigEntryNotReady,
+    ServiceValidationError,
+)
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
+from bs4 import BeautifulSoup
 from librus_apix.client import Client, new_client
-from librus_apix.exceptions import ParseError, TokenError
+from librus_apix.exceptions import AuthorizationError, ParseError, TokenError
+from librus_apix.helpers import no_access_check
 
 from .const import (
+    BLOKADA_LOGOWANIA_S,
     DOMAIN,
     SCAN_INTERVAL,
     SZCZEGOLY_TERMINARZA_LIMIT,
@@ -50,6 +57,41 @@ def _current_semester() -> int:
 
 PLATFORMS = ["sensor"]
 
+KOMUNIKAT_BRAK_DOSTEPU = (
+    "Librus przyjal login i haslo, ale Synergia nie wpuscila sesji (\"Brak dostepu\"). "
+    "Zaloguj sie raz na synergia.librus.pl tym samym loginem, zaakceptuj wszystkie komunikaty "
+    "(regulamin, zmiana hasla) i sprawdz, czy konto nie ma wlaczonego 2FA - "
+    "librus-apix nie obsluguje logowania dwuetapowego."
+)
+
+
+class BrakDostepuSynergii(Exception):
+    """Login i haslo przyjete, ale strony Synergii odpowiadaja 'Brak dostepu'.
+
+    librus-apix uznaje logowanie za udane, gdy ma ciasteczka DZIENNIKSID/SDZIENNIKSID, a te
+    dostajemy jeszcze przed wyslaniem hasla - wiec 2FA czy niezaakceptowany regulamin
+    przechodza przez get_token bez bledu i wychodza dopiero na pierwszej stronie.
+    """
+
+
+def zaloguj(username: str, password: str):
+    """Zaloguj i sprawdz, czy Synergia faktycznie wpuszcza sesje (blokujace, do executora).
+
+    Zwraca (client, token). Rzuca AuthorizationError (zly login/haslo), MaintananceError,
+    BrakDostepuSynergii albo bledy sieciowe.
+    """
+    client = new_client()
+    token = client.get_token(username, password)
+    resp = client.get(client.INFO_URL)
+    if "/loguj" in str(getattr(resp, "url", "") or ""):
+        raise BrakDostepuSynergii(KOMUNIKAT_BRAK_DOSTEPU)
+    try:
+        no_access_check(BeautifulSoup(resp.text or "", "lxml"))
+    except TokenError as ex:
+        raise BrakDostepuSynergii(KOMUNIKAT_BRAK_DOSTEPU) from ex
+    return client, token
+
+
 CONFIG_SCHEMA = vol.Schema(
     {
         DOMAIN: vol.Schema(
@@ -73,6 +115,7 @@ class LibrusApiClient:
         self._client: Client = None
         self._token = None
         self._auth_lock = asyncio.Lock()
+        self._blokada_do = 0.0  # time.monotonic(), do kiedy nie probujemy logowac sie ponownie
         # Szczegoly wpisow terminarza (href -> (czas pobrania, slownik)); jedno zapytanie HTTP na wpis
         self._szczegoly_terminarza: Dict[str, Any] = {}
 
@@ -81,21 +124,40 @@ class LibrusApiClient:
         self._client = None
         self._token = None
 
-    async def async_authenticate(self):
-        """Authenticate with Librus API."""
+    async def async_zaloguj(self) -> None:
+        """Zaloguj ze sprawdzeniem dostepu; bledy (BrakDostepuSynergii, AuthorizationError...) leca dalej."""
         async with self._auth_lock:
             try:
                 loop = asyncio.get_running_loop()
-                self._client = await loop.run_in_executor(None, new_client)
-                self._token = await loop.run_in_executor(
-                    None, self._client.get_token, self.username, self.password
+                self._client, self._token = await loop.run_in_executor(
+                    None, zaloguj, self.username, self.password
                 )
-                _LOGGER.debug("Authentication successful for %s", self.username)
-                return True
-            except Exception as ex:
-                _LOGGER.error("Authentication failed: %s\n%s", ex, traceback.format_exc())
+            except Exception:
                 self._reset_auth()
-                return False
+                raise
+            self._blokada_do = 0.0
+            _LOGGER.debug("Authentication successful for %s", self.username)
+
+    async def async_authenticate(self):
+        """Authenticate with Librus API; False przy bledzie.
+
+        Po bledzie, ktorego ponawianie nic nie da (zly login/haslo, brak dostepu do Synergii),
+        kolejne wywolania przez BLOKADA_LOGOWANIA_S od razu zwracaja False - inaczej kazda
+        metoda pobierajaca w jednym cyklu logowalaby sie od nowa (kilkanascie logowan).
+        """
+        if time.monotonic() < self._blokada_do:
+            _LOGGER.debug("Logowanie wstrzymane po poprzednim bledzie")
+            return False
+        try:
+            await self.async_zaloguj()
+            return True
+        except (BrakDostepuSynergii, AuthorizationError) as ex:
+            _LOGGER.error("Authentication failed: %s", ex)
+            self._blokada_do = time.monotonic() + BLOKADA_LOGOWANIA_S
+            return False
+        except Exception as ex:
+            _LOGGER.error("Authentication failed: %s\n%s", ex, traceback.format_exc())
+            return False
 
     async def async_get_grades(self):
         """Get grades from Librus."""
@@ -713,14 +775,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     client = LibrusApiClient(username, password)
 
-    # Test authentication
-    if not await client.async_authenticate():
-        _LOGGER.error("Failed to authenticate")
-        return False
+    try:
+        await client.async_zaloguj()
+    except BrakDostepuSynergii as ex:
+        raise ConfigEntryError(str(ex)) from ex
+    except AuthorizationError as ex:
+        raise ConfigEntryError(f"Librus odrzucil logowanie: {ex}") from ex
+    except Exception as ex:  # noqa: BLE001 - przerwa techniczna, siec: HA sprobuje ponownie
+        raise ConfigEntryNotReady(f"Nie udalo sie polaczyc z Librusem: {ex}") from ex
+
+    # Pierwsze pobranie przed przekazaniem platform - HA wymaga, by ConfigEntryNotReady
+    # padalo tutaj, a nie w platformie sensor
+    from .sensor import LibrusDataUpdateCoordinator
+
+    coordinator = LibrusDataUpdateCoordinator(hass, client, entry)
+    await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})
-    # Koordynator uzupelnia sensor.py (potrzebny usludze pobierz_tydzien)
-    hass.data[DOMAIN][entry.entry_id] = {"client": client, "coordinator": None}
+    hass.data[DOMAIN][entry.entry_id] = {"client": client, "coordinator": coordinator}
 
     # Setup platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

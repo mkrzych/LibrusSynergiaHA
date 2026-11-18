@@ -26,6 +26,7 @@ def mock_librus_client():
     """Return a mock Librus client."""
     client = MagicMock()
     client.async_authenticate = AsyncMock(return_value=True)
+    client.async_zaloguj = AsyncMock(return_value=None)
     client.async_get_grades = AsyncMock(return_value=[
         {
             'subject': 'Mathematyka',

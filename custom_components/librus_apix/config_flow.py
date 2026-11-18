@@ -8,8 +8,6 @@ from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
-from librus_apix.client import new_client
-
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,26 +20,36 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
+class BlednyLogin(Exception):
+    """Librus odrzucil login lub haslo."""
+
+
+class BrakDostepu(Exception):
+    """Login przyjety, ale Synergia nie wpuszcza sesji (2FA, regulamin, zmiana hasla)."""
+
+
 async def validate_input(hass: HomeAssistant, data: dict):
-    """Validate the user input allows us to connect."""
+    """Zaloguj sie i sprawdz, czy strony Synergii sa dostepne (samo get_token tego nie gwarantuje)."""
+    from librus_apix.exceptions import AuthorizationError
+
+    from . import BrakDostepuSynergii, zaloguj
+
     username = data[CONF_USERNAME]
     password = data[CONF_PASSWORD]
-    
-    # Test authentication
+
     try:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        client = await loop.run_in_executor(None, new_client)
-        token = await loop.run_in_executor(None, client.get_token, username, password)
-        
-        if not token:
-            raise ValueError("Authentication failed")
-            
-        return {"title": f"Librus APIX ({username})"}
-    
+        await hass.async_add_executor_job(zaloguj, username, password)
+    except BrakDostepuSynergii as ex:
+        _LOGGER.error("Authentication error: %s", ex)
+        raise BrakDostepu from ex
+    except AuthorizationError as ex:
+        _LOGGER.error("Authentication error: %s", ex)
+        raise BlednyLogin from ex
     except Exception as ex:
         _LOGGER.error("Authentication error: %s", ex)
         raise ValueError("Cannot connect") from ex
+
+    return {"title": f"Librus APIX ({username})"}
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -58,6 +66,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
+            except BrakDostepu:
+                errors["base"] = "brak_dostepu"
+            except BlednyLogin:
+                errors["base"] = "invalid_auth"
             except ValueError:
                 errors["base"] = "cannot_connect"
             except Exception:  # pylint: disable=broad-except

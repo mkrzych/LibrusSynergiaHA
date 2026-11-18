@@ -11,6 +11,8 @@ CONF_PASSWORD = "password"
 
 # Update intervals
 SCAN_INTERVAL = timedelta(hours=2)
+# Po odrzuconym logowaniu (zle haslo, brak dostepu do Synergii) nie probujemy ponownie przez 30 min
+BLOKADA_LOGOWANIA_S = 30 * 60
 TIMETABLE_REFRESH = timedelta(hours=4)
 
 # Default values
